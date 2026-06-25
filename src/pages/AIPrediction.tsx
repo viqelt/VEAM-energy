@@ -295,22 +295,22 @@ ${regionStats.map(r => `${r?.region}: avgPower=${r?.avgPower}W, avgCurrent=${r?.
   };
 
 
-  // ── Sonelgaz tarification dynamique ──────────────────────────────────────
+  // ── Sonelgaz tarification — tranches FIXES (vérifiées sur facture réelle) ──
   const calcSonelgazBill = (dailyKwh: number, days: number): number => {
     const totalKwh = dailyKwh * days;
-    // Sonelgaz tranches scaled by number of days
-    const t1 = 125 * (days / 30);
-    const t2 = 250 * (days / 30);
-    const t3 = 1000 * (days / 30);
+    // Tranche limits are FIXED — not scaled by days (verified on real Sonelgaz bill)
+    const T1 = 125;   // 0 – 125 kWh
+    const T2 = 250;   // 125 – 250 kWh
+    const T3 = 1000;  // 250 – 1000 kWh
     let bill = 0;
-    if (totalKwh <= t1) {
+    if (totalKwh <= T1) {
       bill = totalKwh * 1.7787;
-    } else if (totalKwh <= t2) {
-      bill = t1 * 1.7787 + (totalKwh - t1) * 4.1789;
-    } else if (totalKwh <= t3) {
-      bill = t1 * 1.7787 + t1 * 4.1789 + (totalKwh - t2) * 4.8120;
+    } else if (totalKwh <= T2) {
+      bill = T1 * 1.7787 + (totalKwh - T1) * 4.1789;
+    } else if (totalKwh <= T3) {
+      bill = T1 * 1.7787 + T1 * 4.1789 + (totalKwh - T2) * 4.8120;
     } else {
-      bill = t1 * 1.7787 + t1 * 4.1789 + (t3 - t2) * 4.8120 + (totalKwh - t3) * 5.48;
+      bill = T1 * 1.7787 + T1 * 4.1789 + (T3 - T2) * 4.8120 + (totalKwh - T3) * 5.48;
     }
     return Math.round(bill);
   };
