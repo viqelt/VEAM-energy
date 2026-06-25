@@ -162,13 +162,22 @@ export default function AIPrediction() {
     setLoadingAI(true);
     setAiInsight("");
     try {
-      const prompt = `You are an energy expert. Analyze this home energy data and give 3 smart recommendations in simple English:
-- Daily energy: ${data.totalEnergy} kWh
-- Peak power: ${data.peakPower}W at ${data.peakTime}
-- Top device: ${data.topDevices[0]?.name} (${data.topDevices[0]?.percentage}%)
-- Monthly bill: ${data.estimatedBill} DA
-- CO2: ${data.co2Kg} kg/month
-Give short, practical tips to save energy and money. Max 3 bullet points.`;
+      const prompt = `You are an expert energy consultant specializing in Algerian household electricity consumption and Sonelgaz tariff structures.
+
+Analyze this home energy data and provide smart, actionable recommendations in clear English:
+- Daily energy consumption: ${data.totalEnergy} kWh
+- Peak power recorded: ${data.peakPower}W at ${data.peakTime}
+- Highest consuming zone: ${data.topDevices[0]?.name} (${data.topDevices[0]?.percentage}% of total time)
+- Estimated bill: ${data.estimatedBill} DA
+- CO₂ footprint: ${data.co2Kg} kg/month
+
+Important context — Sonelgaz Tariff Rules:
+• Sonelgaz applies a HIGHER electricity tariff during peak demand hours: 17:00 to 21:00 every day.
+• Running high-power appliances (washing machine, oven, iron, water heater, air conditioner) during this window significantly increases the bill.
+• Outside this window (before 17:00 or after 21:00), the standard lower tariff applies.
+• Electricity tranches are fixed: 0–125 kWh at 1.7787 DA/kWh, 125–250 kWh at 4.1789 DA/kWh, 250–1000 kWh at 4.8120 DA/kWh.
+
+Provide exactly 3 recommendations. Each must be specific, practical, and reference real Sonelgaz tariff logic where relevant. Format as bullet points. Be concise but impactful.`;
 
      const res = await fetch("/api/gemini", {
       method: "POST",
@@ -404,6 +413,7 @@ ${regionStats.map(r => `${r?.region}: avgPower=${r?.avgPower}W, avgCurrent=${r?.
 
       const recommendations = [
         { icon: "⚡", title: "Reduce Peak Hours Usage", description: `Peak at ${peakRow.time} — ${peakRow.power}W detected. Shift high-power tasks to off-peak hours.`, savings: Math.round(estimatedBill * 0.1) },
+        { icon: "🕐", title: "Avoid the 17:00 – 21:00 Window", description: "Sonelgaz applies higher tariffs during peak demand hours (5 PM – 9 PM). Postpone your washing machine, oven, iron, and water heater to before 5 PM or after 9 PM to reduce your bill noticeably.", savings: Math.round(estimatedBill * 0.15) },
         { icon: "🔌", title: `Optimize ${topDevices[0]?.name}`, description: `${topDevices[0]?.name} consumes ${topDevices[0]?.percentage}% of total energy. Consider scheduling.`, savings: Math.round(estimatedBill * 0.12) },
         { icon: "❄️", title: "AC Optimization", description: "Set AC to 24°C instead of 20°C to reduce consumption by 25%.", savings: Math.round(estimatedBill * 0.08) },
         { icon: "💡", title: "Switch to LED Lighting", description: "LED bulbs consume 75% less energy than traditional bulbs.", savings: Math.round(estimatedBill * 0.05) },
