@@ -15,20 +15,22 @@ import {
 } from "lucide-react";
 
 // ── Sonelgaz electricity tranches ─────────────────────────────────────────
+// Tranche limits are FIXED per Sonelgaz billing (verified on real bill).
+// Days only affect total kWh consumed, NOT the tranche boundaries.
 function calcElecBill(dailyKwh: number, days: number): number {
   const kwh = dailyKwh * days;
-  const t1 = 125 * (days / 30);
-  const t2 = 250 * (days / 30);
-  const t3 = 1000 * (days / 30);
+  const T1 = 125;   // 0 – 125 kWh
+  const T2 = 250;   // 125 – 250 kWh
+  const T3 = 1000;  // 250 – 1000 kWh
   let bill = 0;
-  if (kwh <= t1) {
+  if (kwh <= T1) {
     bill = kwh * 1.7787;
-  } else if (kwh <= t2) {
-    bill = t1 * 1.7787 + (kwh - t1) * 4.1789;
-  } else if (kwh <= t3) {
-    bill = t1 * 1.7787 + t1 * 4.1789 + (kwh - t2) * 4.8120;
+  } else if (kwh <= T2) {
+    bill = T1 * 1.7787 + (kwh - T1) * 4.1789;
+  } else if (kwh <= T3) {
+    bill = T1 * 1.7787 + T1 * 4.1789 + (kwh - T2) * 4.8120;
   } else {
-    bill = t1 * 1.7787 + t1 * 4.1789 + (t3 - t2) * 4.8120 + (kwh - t3) * 5.48;
+    bill = T1 * 1.7787 + T1 * 4.1789 + (T3 - T2) * 4.8120 + (kwh - T3) * 5.48;
   }
   return Math.round(bill);
 }
@@ -83,15 +85,13 @@ function AnimatedValue({ target }: { target: number }) {
 }
 
 // ── Tranche badge ──────────────────────────────────────────────────────────
-function TrancheBadge({ kwh, days }: { kwh: number; days: number }) {
-  const scaled1 = 125 * (days / 30);
-  const scaled2 = 250 * (days / 30);
-  const scaled3 = 1000 * (days / 30);
+function TrancheBadge({ kwh }: { kwh: number }) {
+  // Fixed tranche limits — not scaled by days (verified on real Sonelgaz bill)
   let tranche = 1;
   let color = "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300";
-  if (kwh > scaled3) { tranche = 4; color = "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"; }
-  else if (kwh > scaled2) { tranche = 3; color = "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"; }
-  else if (kwh > scaled1) { tranche = 2; color = "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"; }
+  if (kwh > 1000)      { tranche = 4; color = "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"; }
+  else if (kwh > 250)  { tranche = 3; color = "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"; }
+  else if (kwh > 125)  { tranche = 2; color = "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"; }
   return (
     <span className={"text-[10px] font-bold px-2 py-0.5 rounded-full " + color}>
       Tranche {tranche}
@@ -219,7 +219,7 @@ export default function BillCalculator() {
             <CardTitle className="text-sm font-semibold text-gray-900 dark:text-white">Electricity Consumption</CardTitle>
             <p className="text-xs text-gray-400">Average daily usage</p>
           </div>
-          {kwh > 0 && <TrancheBadge kwh={totalKwh} days={billingDays} />}
+          {kwh > 0 && <TrancheBadge kwh={totalKwh} />}
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1.5">
@@ -240,10 +240,10 @@ export default function BillCalculator() {
             <div className="space-y-1.5">
               <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Tarification — {billingDays} days</p>
               {[
-                { range: "0 – " + Math.round(125*(billingDays/30)) + " kWh", rate: "1.7787", color: "bg-green-500" },
-                { range: Math.round(125*(billingDays/30)) + " – " + Math.round(250*(billingDays/30)) + " kWh", rate: "4.1789", color: "bg-blue-500" },
-                { range: Math.round(250*(billingDays/30)) + " – " + Math.round(1000*(billingDays/30)) + " kWh", rate: "4.8120", color: "bg-amber-500" },
-                { range: "> " + Math.round(1000*(billingDays/30)) + " kWh", rate: "5.48", color: "bg-red-500" },
+                { range: "0 – 125 kWh",       rate: "1.7787", color: "bg-green-500" },
+                { range: "125 – 250 kWh",      rate: "4.1789", color: "bg-blue-500" },
+                { range: "250 – 1,000 kWh",    rate: "4.8120", color: "bg-amber-500" },
+                { range: "> 1,000 kWh",         rate: "5.48",   color: "bg-red-500" },
               ].map(t => (
                 <div key={t.rate} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-gray-50 dark:bg-gray-800">
                   <div className="flex items-center gap-2">
