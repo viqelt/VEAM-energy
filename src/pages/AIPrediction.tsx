@@ -114,14 +114,15 @@ export default function AIPrediction() {
   const [showAppliancePanel, setShowAppliancePanel] = useState(false);
 
   useEffect(() => {
+    const recsLength = (sheetData?.recommendations ?? predictions.recommendations).length;
     const timer = setInterval(() => {
       setVisibleCards((prev) => {
-        if (prev >= recs.length) { clearInterval(timer); return prev; }
+        if (prev >= recsLength) { clearInterval(timer); return prev; }
         return prev + 1;
       });
     }, 200);
     return () => clearInterval(timer);
-  }, [recs.length]);
+  }, [(sheetData?.recommendations ?? predictions.recommendations).length]);
 
   const toggleAppliance = (id: string) => {
     setAppliances(prev => prev.map(a => a.id === id ? { ...a, selected: !a.selected } : a));
