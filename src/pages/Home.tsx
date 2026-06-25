@@ -74,12 +74,17 @@ export default function HomePage() {
     return () => clearInterval(tick);
   }, []);
 
+  // Sonelgaz gas — prorata sur 70 jours (vérifié sur facture réelle)
+  const GAS_DAYS = 70;
   const calcGasCost = (th: number): number => {
     if (th <= 0) return 0;
-    if (th <= 2500) return th * 0.1682;
-    if (th <= 5000) return 2500 * 0.1682 + (th - 2500) * 0.3245;
-    if (th <= 15000) return 2500 * 0.1682 + 2500 * 0.3245 + (th - 5000) * 0.4025;
-    return 2500 * 0.1682 + 2500 * 0.3245 + 10000 * 0.4025 + (th - 15000) * 0.60;
+    const L1 = Math.round(2500  * (GAS_DAYS / 365));
+    const L2 = Math.round(5000  * (GAS_DAYS / 365));
+    const L3 = Math.round(15000 * (GAS_DAYS / 365));
+    if (th <= L1) return th * 0.1682;
+    if (th <= L2) return L1 * 0.1682 + (th - L1) * 0.3245;
+    if (th <= L3) return L1 * 0.1682 + (L2 - L1) * 0.3245 + (th - L2) * 0.4025;
+    return L1 * 0.1682 + (L2 - L1) * 0.3245 + (L3 - L2) * 0.4025 + (th - L3) * 0.60;
   };
   const monthlyBill = getEstimatedMonthlyBill(currentPower, false, 0) + (includeGas ? calcGasCost(gasTh) : 0);
 
@@ -373,22 +378,25 @@ export default function HomePage() {
               />
               {includeGas && gasTh > 0 && (() => {
                 const th = gasTh;
+                const L1 = Math.round(2500  * (GAS_DAYS / 365));
+                const L2 = Math.round(5000  * (GAS_DAYS / 365));
+                const L3 = Math.round(15000 * (GAS_DAYS / 365));
                 let total = 0;
                 let rate = "0.1682";
-                if (th <= 2500) {
+                if (th <= L1) {
                   total = th * 0.1682;
                   rate = "0.1682";
-                } else if (th <= 5000) {
-                  total = 2500 * 0.1682 + (th - 2500) * 0.3245;
+                } else if (th <= L2) {
+                  total = L1 * 0.1682 + (th - L1) * 0.3245;
                   rate = "0.3245";
-                } else if (th <= 15000) {
-                  total = 2500 * 0.1682 + 2500 * 0.3245 + (th - 5000) * 0.4025;
+                } else if (th <= L3) {
+                  total = L1 * 0.1682 + (L2 - L1) * 0.3245 + (th - L2) * 0.4025;
                   rate = "0.4025";
                 } else {
-                  total = 2500 * 0.1682 + 2500 * 0.3245 + 10000 * 0.4025 + (th - 15000) * 0.60;
+                  total = L1 * 0.1682 + (L2 - L1) * 0.3245 + (L3 - L2) * 0.4025 + (th - L3) * 0.60;
                   rate = "0.60";
                 }
-                const tier = th <= 2500 ? "🟢 Tier 1" : th <= 5000 ? "🟡 Tier 2" : th <= 15000 ? "🟠 Tier 3" : "🔴 Tier 4";
+                const tier = th <= L1 ? "🟢 Tier 1" : th <= L2 ? "🟡 Tier 2" : th <= L3 ? "🟠 Tier 3" : "🔴 Tier 4";
                 return (
                   <div className="mt-2 space-y-1">
                     <div className="flex items-center justify-between p-2 rounded-lg bg-gray-50">
@@ -403,10 +411,10 @@ export default function HomePage() {
               })()}
               <div className="mt-2 space-y-1">
                 {[
-                  { label: "🟢 0 → 2500 Th", rate: "0.1682 DA/Th" },
-                  { label: "🟡 2500 → 5000 Th", rate: "0.3245 DA/Th" },
-                  { label: "🟠 5000 → 15000 Th", rate: "0.4025 DA/Th" },
-                  { label: "🔴 +15000 Th", rate: "0.60 DA/Th" },
+                  { label: `🟢 0 → ${Math.round(2500*(GAS_DAYS/365))} Th`,                                                    rate: "0.1682 DA/Th" },
+                  { label: `🟡 ${Math.round(2500*(GAS_DAYS/365))} → ${Math.round(5000*(GAS_DAYS/365))} Th`,                   rate: "0.3245 DA/Th" },
+                  { label: `🟠 ${Math.round(5000*(GAS_DAYS/365))} → ${Math.round(15000*(GAS_DAYS/365))} Th`,                  rate: "0.4025 DA/Th" },
+                  { label: `🔴 +${Math.round(15000*(GAS_DAYS/365))} Th`,                                                       rate: "0.60 DA/Th" },
                 ].map((t) => (
                   <div key={t.label} className="flex items-center justify-between text-[10px] text-gray-400">
                     <span>{t.label}</span>
