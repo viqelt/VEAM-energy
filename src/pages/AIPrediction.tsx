@@ -116,12 +116,12 @@ export default function AIPrediction() {
   useEffect(() => {
     const timer = setInterval(() => {
       setVisibleCards((prev) => {
-        if (prev >= predictions.recommendations.length) { clearInterval(timer); return prev; }
+        if (prev >= recs.length) { clearInterval(timer); return prev; }
         return prev + 1;
       });
     }, 200);
     return () => clearInterval(timer);
-  }, [predictions.recommendations.length]);
+  }, [recs.length]);
 
   const toggleAppliance = (id: string) => {
     setAppliances(prev => prev.map(a => a.id === id ? { ...a, selected: !a.selected } : a));
