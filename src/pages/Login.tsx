@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Mail, Lock, ArrowRight, X, Phone, Send, CheckCircle2, User, AlertCircle } from "lucide-react";
+import { Mail, Lock, ArrowRight, X, Phone, Send, CheckCircle2, User, AlertCircle, Eye, EyeOff } from "lucide-react";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -20,6 +20,8 @@ export default function Login() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState("");
   const [showForgot, setShowForgot] = useState(false);
   const [forgotInput, setForgotInput] = useState("");
@@ -161,9 +163,17 @@ export default function Login() {
                 <Label htmlFor="password" className="text-gray-700 text-sm font-medium">Password</Label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input id="password" type="password" placeholder="••••••••" value={password}
+                  <Input id="password" type={showPassword ? "text" : "password"} placeholder="••••••••" value={password}
                     onChange={(e) => setPassword(e.target.value)} required
-                    className="pl-10 h-11 border-gray-200 focus:border-indigo-500 focus:ring-indigo-500 rounded-lg" />
+                    className="pl-10 pr-10 h-11 border-gray-200 focus:border-indigo-500 focus:ring-indigo-500 rounded-lg" />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-indigo-500 transition-colors"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
                 </div>
               </div>
 
@@ -175,7 +185,28 @@ export default function Login() {
               )}
 
               {isLogin && (
-                <div className="text-right">
+                <div className="flex items-center justify-between">
+                  {/* Keep me signed in */}
+                  <label className="flex items-center gap-2 cursor-pointer select-none group">
+                    <div
+                      onClick={() => setRememberMe((prev) => !prev)}
+                      className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-all duration-200 ${
+                        rememberMe
+                          ? "bg-indigo-500 border-indigo-500"
+                          : "border-gray-300 group-hover:border-indigo-400"
+                      }`}
+                    >
+                      {rememberMe && (
+                        <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-500 group-hover:text-gray-700 transition-colors">
+                      Keep me signed in
+                    </span>
+                  </label>
+                  {/* Forgot password */}
                   <button type="button" onClick={() => setShowForgot(true)}
                     className="text-xs font-medium text-indigo-600 hover:text-purple-600 transition-colors hover:underline">
                     Forgot my password?
