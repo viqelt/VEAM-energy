@@ -169,7 +169,7 @@ export default function Login() {
                   <button
                     type="button"
                     onClick={() => setShowPassword((prev) => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-indigo-500 transition-colors"
+                    className="absolute right-0 top-1/2 -translate-y-1/2 p-3 text-gray-400 hover:text-indigo-500 transition-colors"
                     aria-label={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -187,9 +187,11 @@ export default function Login() {
               {isLogin && (
                 <div className="flex items-center justify-between">
                   {/* Keep me signed in */}
-                  <label className="flex items-center gap-2 cursor-pointer select-none group">
+                  <label
+                    className="flex items-center gap-2 cursor-pointer select-none group py-2 pr-3"
+                    onClick={() => setRememberMe((prev) => !prev)}
+                  >
                     <div
-                      onClick={() => setRememberMe((prev) => !prev)}
                       className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-all duration-200 ${
                         rememberMe
                           ? "bg-indigo-500 border-indigo-500"
