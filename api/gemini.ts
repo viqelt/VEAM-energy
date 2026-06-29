@@ -43,7 +43,7 @@ export default async function handler(req: Request) {
         "Authorization": `Bearer ${GROQ_KEY}`,
       },
       body: JSON.stringify({
-        model: "openai/gpt-oss-120",
+        model: "openai/gpt-oss-120b",
         messages: [{ role: "user", content: prompt }],
         max_tokens: 2048,
         temperature: 0.7,
