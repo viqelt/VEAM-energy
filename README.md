@@ -9,7 +9,7 @@
 [![Live Demo](https://img.shields.io/badge/🌐_Live_Demo-veam--energy.vercel.app-6366f1?style=for-the-badge)](https://veam-energy.vercel.app)
 [![React](https://img.shields.io/badge/React_18-TypeScript-61DAFB?style=for-the-badge&logo=react)](https://reactjs.org)
 [![Vercel](https://img.shields.io/badge/Deployed_on-Vercel-000000?style=for-the-badge&logo=vercel)](https://vercel.com)
-[![Groq AI](https://img.shields.io/badge/AI-Groq_LLaMA_3.3-ff6b35?style=for-the-badge)](https://groq.com)
+[![Groq AI](https://img.shields.io/badge/AI-Groq_GPT--OSS_120B-ff6b35?style=for-the-badge)](https://groq.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
 > A Master's graduation project — University of Souk Ahras, Algeria 🇩🇿
@@ -80,7 +80,7 @@ Using a **NILM-inspired approach**, Groq AI analyzes real power signatures (volt
 ### 💬 VEAM Assistant
 - AI chatbot built into the Help page
 - Knows everything about VEAM: setup, features, billing, NILM, alerts
-- Powered by Groq AI (LLaMA 3.3 70B)
+- Powered by Groq AI (GPT-OSS 120B)
 
 ---
 
@@ -91,7 +91,7 @@ Using a **NILM-inspired approach**, Groq AI analyzes real power signatures (volt
 | **Frontend** | React 18 + TypeScript + Vite |
 | **Styling** | Tailwind CSS + shadcn/ui |
 | **Charts** | Recharts |
-| **AI Engine** | Groq AI — LLaMA 3.3 70B |
+| **AI Engine** | Groq AI — GPT-OSS 120B |
 | **NILM-Inspired** | Groq AI — power region analysis & appliance inference |
 | **WhatsApp Alerts** | Twilio WhatsApp Sandbox API |
 | **Backend API** | Vercel Edge Runtime (serverless functions) |
@@ -136,7 +136,7 @@ Real Electrical Data (every 3 seconds via ESP32)
         ↓
 [Vercel Edge Functions]
         |
-        ├── /api/gemini       → Groq AI (LLaMA 3.3)
+        ├── /api/gemini       → Groq AI (GPT-OSS 120B)
         └── /api/send-whatsapp → Twilio WhatsApp
         |
         ↓
