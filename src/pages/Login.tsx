@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Mail, Lock, ArrowRight, X, Phone, Send, CheckCircle2, User, AlertCircle, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, ArrowRight, X, Phone, Send, CheckCircle2, User, AlertCircle, Eye, EyeOff, RefreshCw, ShieldCheck } from "lucide-react";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -28,7 +28,25 @@ export default function Login() {
   const [forgotSent, setForgotSent] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotError, setForgotError] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [captchaCode, setCaptchaCode] = useState("");
+  const [captchaInput, setCaptchaInput] = useState("");
   const navigate = useNavigate();
+
+  const generateCaptcha = () => {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I to avoid confusion
+    let code = "";
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setCaptchaCode(code);
+    setCaptchaInput("");
+  };
+
+  useEffect(() => {
+    if (!isLogin) generateCaptcha();
+  }, [isLogin]);
 
   const getErrorMessage = (code: string) => {
     switch (code) {
@@ -46,6 +64,19 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    if (!isLogin) {
+      if (password !== confirmPassword) {
+        setError("Passwords do not match.");
+        return;
+      }
+      if (captchaInput.trim().toUpperCase() !== captchaCode) {
+        setError("Captcha code is incorrect.");
+        generateCaptcha();
+        return;
+      }
+    }
+
     setIsLoading(true);
     try {
       if (isLogin) {
@@ -176,6 +207,61 @@ export default function Login() {
                   </button>
                 </div>
               </div>
+
+              {!isLogin && (
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword" className="text-gray-700 text-sm font-medium">Confirm Password</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input id="confirmPassword" type={showConfirmPassword ? "text" : "password"} placeholder="••••••••" value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)} required
+                      className="pl-10 pr-10 h-11 border-gray-200 focus:border-indigo-500 focus:ring-indigo-500 rounded-lg" />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword((prev) => !prev)}
+                      className="absolute right-0 top-1/2 -translate-y-1/2 p-3 text-gray-400 hover:text-indigo-500 transition-colors"
+                      aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!isLogin && (
+                <div className="space-y-2">
+                  <Label htmlFor="captchaInput" className="text-gray-700 text-sm font-medium">Security Code</Label>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-11 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center select-none overflow-hidden relative">
+                      <span
+                        className="text-lg font-bold tracking-[0.3em] text-gray-700 italic"
+                        style={{
+                          background: "repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(99,102,241,0.08) 4px, rgba(99,102,241,0.08) 8px)",
+                          letterSpacing: "0.3em",
+                          textDecoration: "line-through",
+                          textDecorationColor: "rgba(99,102,241,0.3)",
+                        }}
+                      >
+                        {captchaCode}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={generateCaptcha}
+                      className="h-11 w-11 shrink-0 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:text-indigo-500 hover:border-indigo-300 transition-colors"
+                      aria-label="Refresh captcha"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input id="captchaInput" type="text" placeholder="Enter the code above" value={captchaInput}
+                      onChange={(e) => setCaptchaInput(e.target.value)} required
+                      className="pl-10 h-11 border-gray-200 focus:border-indigo-500 focus:ring-indigo-500 rounded-lg uppercase" />
+                  </div>
+                </div>
+              )}
 
               {error && (
                 <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg border border-red-100">
