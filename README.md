@@ -36,7 +36,7 @@
 
 ## 📌 About
 
-**VEAM** (Visual Energy Analytics & Monitoring) is a full-stack smart home energy monitoring system developed as a Master 1 graduation project in Industrial Electrotechnics.
+**VEAM** (Visual Energy Analytics & Monitoring) is a full-stack smart home energy monitoring system developed as a Master 2 graduation project in Industrial Electrotechnics.
 
 The system combines **real IoT hardware** (ESP32 + PZEM-004T) with an **AI-powered web dashboard** to give Algerian households real-time insights into their electricity consumption, estimated Sonelgaz bills, and appliance-level energy analysis — all from a single current clamp sensor.
 
