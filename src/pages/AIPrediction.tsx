@@ -38,9 +38,10 @@ import { getAIPredictions } from "@/lib/mockData";
 const SHEET_ID = "1g9XRplcjctpLaOnxmsy7C_0o8dc9Yy4-Zny6m7XSyXg";
 const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv`;
 
-// ESP32 pushes one reading roughly every 3s (see README). Used to convert a run of
-// consecutive same-region samples into a real duration, instead of a bare sample count.
-const SAMPLE_INTERVAL_SECONDS = 3;
+// Confirmed from the real exported dataset (Jan–Feb 2025 CSV): one reading every
+// 20 seconds — NOT the 3s mentioned in the README. This constant drives every
+// duration/occurrence calculation below, so it must match the actual hardware rate.
+const SAMPLE_INTERVAL_SECONDS = 20;
 
 // ─── Default appliances list ──────────────────────────────────────────────────
 const DEFAULT_APPLIANCES = [
@@ -202,12 +203,12 @@ Provide exactly 3 recommendations. Each must be specific, practical, and referen
   };
 
   // ─── NILM: Event-Based Segmentation + User-Informed Rule Check ─────────────
-  // Step 1: instead of judging each sample in isolation, walk the chronological
-  // sequence and group consecutive samples that fall in the same power region into
-  // "segments" (ON events). This is standard edge/event-based NILM: a fridge shows
-  // many SHORT recurring segments, an AC/water-heater shows FEW LONG segments, an
-  // iron/kettle shows a single short high-power spike. Two readings with the same
-  // average power but different segment shapes are no longer treated as identical.
+  // Instead of judging each sample in isolation, walk the chronological sequence
+  // and group consecutive samples that fall in the same power region into
+  // "segments" (ON events), using REAL elapsed time between timestamps (not a
+  // fixed-interval assumption, which breaks across data gaps / multi-day spans).
+  // A 1-sample flicker at a region boundary (sensor noise) is also smoothed out
+  // before segmenting, so it isn't miscounted as a real ON/OFF event.
   const runNILM = async (rows: SheetAnalysis["rawRows"]) => {
     setLoadingNILM(true);
     setNilmDevices([]);
@@ -220,30 +221,73 @@ Provide exactly 3 recommendations. Each must be specific, practical, and referen
         { region: "Region E", min: 1700, max: 99999 },
       ];
       const regionOf = (p: number) => regionDefs.find(r => p >= r.min && p < r.max)?.region ?? regionDefs[regionDefs.length - 1].region;
+      const MAX_GAP_SECONDS = SAMPLE_INTERVAL_SECONDS * 5; // ~100s: tolerate a couple of missed samples before treating it as a real data hole
 
       // Rows arrive already chronologically sorted from analyzeSheet, but sort
       // defensively — segmentation is meaningless on an out-of-order sequence.
       const sorted = [...rows].sort((a, b) => a.time.localeCompare(b.time));
       if (sorted.length === 0) throw new Error("No data");
 
-      // Walk the sequence once and cut it into segments whenever the region changes.
-      type Segment = { region: string; length: number; stepIn: number };
+      // Parse each timestamp to real seconds. Real export format is
+      // "YYYY-MM-DD H:MM:SS" with a NON-zero-padded hour (e.g. "2025-01-01 0:00:00"),
+      // which Date.parse() silently rejects (returns NaN) — so this is done manually
+      // instead of relying on the built-in parser. Falls back to a bare "H:MM:SS" parse
+      // (seconds-of-day only) if no date part is present.
+      const parseTimeSeconds = (t: string): number | null => {
+        const spaceIdx = t.indexOf(" ");
+        if (spaceIdx > 0) {
+          const datePart = t.slice(0, spaceIdx);
+          const timePart = t.slice(spaceIdx + 1);
+          const [y, mo, d] = datePart.split("-").map(Number);
+          const [h, mi, se] = timePart.split(":").map(Number);
+          if ([y, mo, d, h, mi, se].some(n => n === undefined || isNaN(n))) return null;
+          return Date.UTC(y, mo - 1, d, h, mi, se) / 1000;
+        }
+        const parts = t.split(":").map(Number);
+        if (parts.length < 2 || parts.some(isNaN)) return null;
+        const [h, m, s = 0] = parts;
+        return h * 3600 + m * 60 + s;
+      };
+      const epochs = sorted.map(row => parseTimeSeconds(row.time));
+      const elapsedTo = (i: number): number => {
+        const a = epochs[i - 1], b = epochs[i];
+        if (a === null || b === null) return SAMPLE_INTERVAL_SECONDS;
+        const d = b - a;
+        return (d <= 0 || d > MAX_GAP_SECONDS) ? SAMPLE_INTERVAL_SECONDS : d;
+      };
+
+      // Debounce: snap a single isolated sample back to its neighbors' region if
+      // both neighbors agree with each other but not with it (removes boundary jitter).
+      const rawRegionSeq = sorted.map(row => regionOf(row.power));
+      const regionSeq = rawRegionSeq.map((r, i) => {
+        if (i === 0 || i === rawRegionSeq.length - 1) return r;
+        const prev = rawRegionSeq[i - 1], next = rawRegionSeq[i + 1];
+        return (r !== prev && r !== next && prev === next) ? prev : r;
+      });
+
+      // Walk the smoothed sequence once, accumulating REAL elapsed seconds per run.
+      type Segment = { region: string; durationSec: number };
       const segments: Segment[] = [];
-      let curRegion = regionOf(sorted[0].power);
-      let curLen = 1;
-      for (let i = 1; i < sorted.length; i++) {
-        const region = regionOf(sorted[i].power);
-        if (region === curRegion) {
-          curLen++;
+      let curRegion = regionSeq[0];
+      let curDur = SAMPLE_INTERVAL_SECONDS;
+      for (let i = 1; i < regionSeq.length; i++) {
+        const gap = elapsedTo(i);
+        if (regionSeq[i] === curRegion) {
+          curDur += gap;
         } else {
-          segments.push({ region: curRegion, length: curLen, stepIn: sorted[i - 1].power - sorted[i - curLen].power });
-          curRegion = region;
-          curLen = 1;
+          segments.push({ region: curRegion, durationSec: curDur });
+          curRegion = regionSeq[i];
+          curDur = gap;
         }
       }
-      segments.push({ region: curRegion, length: curLen, stepIn: 0 });
+      segments.push({ region: curRegion, durationSec: curDur });
 
-      const totalSpanDays = Math.max((sorted.length * SAMPLE_INTERVAL_SECONDS) / 86400, 1 / 24);
+      // Real dataset span (falls back to the old fixed-rate estimate only if timestamps
+      // genuinely can't be parsed at all).
+      const validEpochs = epochs.filter((e): e is number => e !== null);
+      const totalSpanDays = validEpochs.length >= 2
+        ? Math.max((validEpochs[validEpochs.length - 1] - validEpochs[0]) / 86400, 1 / 24)
+        : Math.max((sorted.length * SAMPLE_INTERVAL_SECONDS) / 86400, 1 / 24);
 
       const regionStats = regionDefs.map(r => {
         const matched = sorted.filter(row => row.power >= r.min && row.power < r.max);
@@ -253,7 +297,8 @@ Provide exactly 3 recommendations. Each must be specific, practical, and referen
         const avgCurrent = parseFloat((matched.reduce((s, x) => s + x.current, 0) / matched.length).toFixed(2));
         const avgPF = parseFloat((matched.reduce((s, x) => s + x.powerFactor, 0) / matched.length).toFixed(2));
         const percentage = Math.round((matched.length / sorted.length) * 100);
-        const avgDurationMin = parseFloat(((ownSegments.reduce((s, x) => s + x.length, 0) / ownSegments.length) * SAMPLE_INTERVAL_SECONDS / 60).toFixed(1));
+        const totalActiveSec = ownSegments.reduce((s, x) => s + x.durationSec, 0);
+        const avgDurationMin = parseFloat((totalActiveSec / ownSegments.length / 60).toFixed(1));
         const occurrencesPerDay = parseFloat((ownSegments.length / totalSpanDays).toFixed(1));
         return { region: r.region, avgPower, avgCurrent, avgPF, percentage, avgDurationMin, occurrencesPerDay };
       }).filter(Boolean) as { region: string; avgPower: number; avgCurrent: number; avgPF: number; percentage: number; avgDurationMin: number; occurrencesPerDay: number }[];
@@ -303,6 +348,7 @@ TEMPORAL REASONING RULES (apply BEFORE picking a device):
 - Long duration (>60 min) + occurrences ≈ 1–2/day → always-on baseline (fridge overall envelope, standby/router, lighting in the evening).
 - Medium duration (3–15 min) + moderate occurrences (3–10/day) → manually operated appliance used a few times a day (microwave, washing machine cycle).
 - If temporal behavior contradicts the power-only guess (e.g. a "fridge-range" region with only 1 occurrence/day lasting 3 hours), trust the temporal pattern over the raw power reference table.
+- If occurrences is implausibly high (>50/day) treat it as sensor noise/borderline switching rather than a real distinct appliance — label it with your best power-based guess and confidence "Low" or "Medium", but still answer, never refuse.
 
 MATCHING RULES:
 - Match each region to the appliance(s) whose power AND temporal behavior fit together.
@@ -333,7 +379,19 @@ ${regionStats.map(r => `${r.region}: avgPower=${r.avgPower}W, avgCurrent=${r.avg
         const clean = text.replace(/```json|```/g, "").trim();
         parsed = JSON.parse(clean);
       } catch {
-        parsed = [];
+        // Model sometimes adds stray commentary despite instructions — try to pull
+        // out just the [...] array substring before giving up entirely.
+        const match = text.match(/\[[\s\S]*\]/);
+        if (match) {
+          try { parsed = JSON.parse(match[0]); } catch { parsed = []; }
+        } else {
+          parsed = [];
+        }
+      }
+      if (parsed.length === 0) {
+        // Surface the raw AI response in the console so it can be inspected —
+        // this is the difference between "AI truly had no answer" and "AI errored".
+        console.error("NILM: Groq response could not be parsed as JSON:", text);
       }
 
       // Deterministic rule-based confidence check (no LLM involved): compare the
