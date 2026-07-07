@@ -114,6 +114,7 @@ export default function AIPrediction() {
   // NILM states
   const [nilmDevices, setNilmDevices] = useState<NILMDevice[]>([]);
   const [loadingNILM, setLoadingNILM] = useState(false);
+  const [nilmDebug, setNilmDebug] = useState(""); // raw Groq text when JSON parsing fails — shown in UI for easy troubleshooting
 
   // User appliances state
   const [appliances, setAppliances] = useState(DEFAULT_APPLIANCES);
@@ -212,6 +213,7 @@ Provide exactly 3 recommendations. Each must be specific, practical, and referen
   const runNILM = async (rows: SheetAnalysis["rawRows"]) => {
     setLoadingNILM(true);
     setNilmDevices([]);
+    setNilmDebug("");
     try {
       const regionDefs = [
         { region: "Region A", min: 0,    max: 400   },
@@ -389,9 +391,10 @@ ${regionStats.map(r => `${r.region}: avgPower=${r.avgPower}W, avgCurrent=${r.avg
         }
       }
       if (parsed.length === 0) {
-        // Surface the raw AI response in the console so it can be inspected —
-        // this is the difference between "AI truly had no answer" and "AI errored".
+        // Surface the raw AI response on-screen (and in the console) so it can be
+        // inspected — this is the difference between "AI truly had no answer" and "AI errored".
         console.error("NILM: Groq response could not be parsed as JSON:", text);
+        setNilmDebug(text);
       }
 
       // Deterministic rule-based confidence check (no LLM involved): compare the
@@ -1086,6 +1089,12 @@ ${regionStats.map(r => `${r.region}: avgPower=${r.avgPower}W, avgCurrent=${r.avg
                 >
                   Re-analyze
                 </Button>
+              </div>
+            )}
+            {nilmDebug && (
+              <div className="mt-2 p-3 rounded-xl bg-red-50 border border-red-200">
+                <p className="text-[11px] font-semibold text-red-600 mb-1">⚠️ AI response couldn't be read as data — raw reply below (copy this to debug):</p>
+                <p className="text-[10px] text-red-500 font-mono whitespace-pre-wrap break-words max-h-40 overflow-y-auto">{nilmDebug}</p>
               </div>
             )}
           </CardContent>
