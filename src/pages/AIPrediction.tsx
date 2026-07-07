@@ -43,6 +43,9 @@ const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tq
 // duration/occurrence calculation below, so it must match the actual hardware rate.
 const SAMPLE_INTERVAL_SECONDS = 20;
 
+// Persists the user's appliance list across visits so they don't have to re-enter it every time.
+const APPLIANCES_STORAGE_KEY = "veam_appliances_v1";
+
 // ─── Default appliances list ──────────────────────────────────────────────────
 const DEFAULT_APPLIANCES = [
   { id: "fridge",   label: "Refrigerator",    icon: "🧊", selected: true,  count: 1, dailyHours: 24, usageTime: "24/7" },
@@ -116,10 +119,27 @@ export default function AIPrediction() {
   const [loadingNILM, setLoadingNILM] = useState(false);
   const [nilmDebug, setNilmDebug] = useState(""); // raw Groq text when JSON parsing fails — shown in UI for easy troubleshooting
 
-  // User appliances state
-  const [appliances, setAppliances] = useState(DEFAULT_APPLIANCES);
+  // User appliances state — restored from localStorage if the user has visited before,
+  // so they don't have to re-enter their appliance list every time.
+  const [appliances, setAppliances] = useState(() => {
+    try {
+      const saved = localStorage.getItem(APPLIANCES_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore corrupt/unavailable storage — fall back to defaults
+    }
+    return DEFAULT_APPLIANCES;
+  });
   const [customInput, setCustomInput] = useState("");
   const [showAppliancePanel, setShowAppliancePanel] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(APPLIANCES_STORAGE_KEY, JSON.stringify(appliances));
+    } catch {
+      // storage full/unavailable — silently skip, not critical
+    }
+  }, [appliances]);
 
   useEffect(() => {
     const recsLength = (sheetData?.recommendations ?? predictions.recommendations).length;
@@ -422,13 +442,72 @@ ${regionStats.map(r => `${r.region}: avgPower=${r.avgPower}W, avgCurrent=${r.avg
         return "Low"; // usage pattern strongly contradicts what the user declared
       };
 
+      // ── Rule-based post-processing (deterministic, no LLM involved) ────────────
+      // 1) No appliance may end up claimed by more than one region — if Groq repeats
+      //    a device across regions, keep it only where its confidence is highest.
+      // 2) Every appliance the user selected must be placed SOMEWHERE — if Groq never
+      //    mentioned it at all, it gets assigned here using a rough wattage lookup
+      //    (or simple load-balancing for unknown/custom appliances).
+      const confidenceRank = (c: string) => c === "High" ? 3 : c === "Medium" ? 2 : c === "Low" ? 1 : 0;
+
+      type Claim = { name: string; confidence: string };
+      const regionClaims: Record<string, Claim[]> = {};
+      regionDefs.forEach(r => { regionClaims[r.region] = []; });
+      parsed.forEach(p => {
+        const names = (p.detectedDevices || "").split(",").map(n => n.trim()).filter(Boolean);
+        names.forEach(name => {
+          if (regionClaims[p.region]) regionClaims[p.region].push({ name, confidence: p.confidence });
+        });
+      });
+
+      // Keep only each device's single highest-confidence claim across all regions.
+      const bestClaimByName = new Map<string, { region: string; confidence: string }>();
+      regionDefs.forEach(r => {
+        regionClaims[r.region].forEach(claim => {
+          const key = claim.name.toLowerCase();
+          const existing = bestClaimByName.get(key);
+          if (!existing || confidenceRank(claim.confidence) > confidenceRank(existing.confidence)) {
+            bestClaimByName.set(key, { region: r.region, confidence: claim.confidence });
+          }
+        });
+      });
+      const finalDevices: Record<string, Claim[]> = {};
+      regionDefs.forEach(r => { finalDevices[r.region] = []; });
+      bestClaimByName.forEach((winner, nameLc) => {
+        const original = regionClaims[winner.region].find(c => c.name.toLowerCase() === nameLc);
+        finalDevices[winner.region].push({ name: original?.name ?? nameLc, confidence: winner.confidence });
+      });
+
+      // Typical wattage for known appliance types — used to place any appliance Groq
+      // never mentioned into the region its power profile actually fits.
+      const POWER_HINT: Record<string, number> = {
+        "refrigerator": 150, "air conditioner": 1600, "water heater": 1200,
+        "washing machine": 900, "tv": 120, "lighting": 15, "microwave": 900,
+        "oven": 1500, "computer / pc": 200, "hair dryer": 1200,
+      };
+      const uniqueApplianceLabels = Array.from(new Set(appliances.filter(a => a.selected).map(a => a.label)));
+      uniqueApplianceLabels.forEach(label => {
+        const labelLc = label.toLowerCase();
+        const alreadyPlaced = Array.from(bestClaimByName.keys()).some(n => n.includes(labelLc) || labelLc.includes(n));
+        if (alreadyPlaced) return;
+
+        const hint = POWER_HINT[labelLc];
+        const targetRegion = hint !== undefined
+          ? regionStats.reduce((best, r) => Math.abs(r.avgPower - hint) < Math.abs(best.avgPower - hint) ? r : best, regionStats[0]).region
+          : regionDefs.reduce((best, r) => finalDevices[r.region].length < finalDevices[best.region].length ? r : best, regionDefs[0]).region;
+
+        finalDevices[targetRegion].push({ name: label, confidence: "Low" }); // unverified rule-based placement
+        bestClaimByName.set(labelLc, { region: targetRegion, confidence: "Low" });
+      });
+
       const result: NILMDevice[] = regionStats.map(r => {
-        const match = parsed.find(p => p.region === r.region);
-        const detectedDevices = match?.detectedDevices ?? "Unknown";
-        const estimatedMinPerDay = r.avgDurationMin * r.occurrencesPerDay;
-        const confidence = match
-          ? adjustConfidence(detectedDevices, match.confidence, estimatedMinPerDay)
+        const devices = finalDevices[r.region];
+        const detectedDevices = devices.length > 0 ? devices.map(d => d.name).join(", ") : "No clear match";
+        const regionConfidence = devices.length > 0
+          ? devices.reduce((best, d) => confidenceRank(d.confidence) > confidenceRank(best) ? d.confidence : best, devices[0].confidence)
           : "Low";
+        const estimatedMinPerDay = r.avgDurationMin * r.occurrencesPerDay;
+        const confidence = adjustConfidence(detectedDevices, regionConfidence, estimatedMinPerDay);
         return {
           region: r.region,
           percentage: r.percentage,
