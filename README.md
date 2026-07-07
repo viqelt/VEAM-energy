@@ -63,7 +63,7 @@ Using a **NILM-inspired approach**, Groq AI analyzes real power signatures (volt
 ### 🤖 AI Prediction (NILM-Inspired)
 - **Estimated Monthly Bill** — projects cost based on current consumption rate
 - **Potential Savings** — estimates savings if AI recommendations are followed
-- **NILM-Inspired Appliance Detection** — divides data into 5 power regions (A→E) and estimates which appliances are active based on power signatures
+- **NILM-Inspired Appliance Detection** — segments live data into 5 power regions (A→E) using real event-based segmentation (actual elapsed time between readings, noise-debounced), then Groq AI + a deterministic rule engine infer which appliances are active — no appliance duplicated across regions, every user-selected appliance placed somewhere, confidence cross-checked against declared daily usage
 - **Groq AI Recommendations** — 3 personalized energy-saving tips
 - **Carbon Footprint** — CO₂ kg/month + equivalent km driven by car
 
@@ -92,7 +92,7 @@ Using a **NILM-inspired approach**, Groq AI analyzes real power signatures (volt
 | **Styling** | Tailwind CSS + shadcn/ui |
 | **Charts** | Recharts |
 | **AI Engine** | Groq AI — GPT-OSS 120B |
-| **NILM-Inspired** | Groq AI — power region analysis & appliance inference |
+| **NILM-Inspired** | Event-based segmentation + Groq AI inference + deterministic rule engine |
 | **WhatsApp Alerts** | Twilio WhatsApp Sandbox API |
 | **Backend API** | Vercel Edge Runtime (serverless functions) |
 | **Data Source** | Google Sheets API (real ESP32 data) |
@@ -104,22 +104,34 @@ Using a **NILM-inspired approach**, Groq AI analyzes real power signatures (volt
 ## ⚡ NILM-Inspired Detection — How It Works
 
 ```
-Real Electrical Data (every 3 seconds via ESP32)
+Real Electrical Data (1 reading every 20 seconds via ESP32)
   Voltage · Current · Active Power · Power Factor · Frequency
                           ↓
          Power Region Segmentation (5 regions A→E)
          A: 0–400W  B: 400–800W  C: 800–1200W
          D: 1200–1700W  E: 1700W+
                           ↓
+     Event-Based Segmentation (edge detection)
+     Real elapsed time between timestamps + single-sample
+     noise debounce → avg run duration (min) & occurrences/day
+                          ↓
     User provides appliance list + expected usage hours
                           ↓
-         Groq AI analyzes power signatures per region
-         → estimates most likely appliance category
+     Groq AI analyzes power signature AND temporal behavior
+     per region (duration + frequency of ON events — not
+     just average power) against the declared appliance list
+                          ↓
+     Deterministic rule engine (no LLM involved):
+     • no appliance ever claimed by more than one region
+     • every user-selected appliance placed somewhere,
+       even if Groq never mentioned it
+     • confidence cross-checked against the appliance's
+       declared daily usage hours
                           ↓
     Output: Appliance · Avg Power · Monthly kWh · Est. Cost DA
 ```
 
-> **Note:** This is a NILM-*inspired* approach. Appliance classification is performed by Groq AI (LLM-based inference) using real power signatures and user-provided constraints — not a trained ML model or dedicated NILM dataset. It is best described as *AI-assisted power signature analysis*.
+> **Note:** This is a NILM-*inspired* hybrid approach: appliance classification combines real event-based signal segmentation (edge detection, run duration, occurrence frequency) with Groq AI (LLM-based inference) and a deterministic rule engine for de-duplication, full appliance coverage, and usage-based confidence scoring — not a trained ML model or dedicated NILM dataset. It is best described as *AI-assisted power + temporal signature analysis with rule-based validation*.
 
 ---
 
