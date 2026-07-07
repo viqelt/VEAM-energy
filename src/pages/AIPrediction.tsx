@@ -38,6 +38,10 @@ import { getAIPredictions } from "@/lib/mockData";
 const SHEET_ID = "1g9XRplcjctpLaOnxmsy7C_0o8dc9Yy4-Zny6m7XSyXg";
 const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv`;
 
+// ESP32 pushes one reading roughly every 3s (see README). Used to convert a run of
+// consecutive same-region samples into a real duration, instead of a bare sample count.
+const SAMPLE_INTERVAL_SECONDS = 3;
+
 // ─── Default appliances list ──────────────────────────────────────────────────
 const DEFAULT_APPLIANCES = [
   { id: "fridge",   label: "Refrigerator",    icon: "🧊", selected: true,  count: 1, dailyHours: 24, usageTime: "24/7" },
@@ -90,6 +94,8 @@ interface NILMDevice {
   avgPower: number;
   detectedDevices: string;
   confidence: string;
+  avgDurationMin?: number;   // avg length of one continuous run in this region
+  occurrencesPerDay?: number; // how many times/day this region is entered (ON events)
 }
 
 export default function AIPrediction() {
@@ -195,28 +201,62 @@ Provide exactly 3 recommendations. Each must be specific, practical, and referen
     }
   };
 
-  // ─── NILM: User-Informed — uses selected appliances to constrain detection ──
+  // ─── NILM: Event-Based Segmentation + User-Informed Rule Check ─────────────
+  // Step 1: instead of judging each sample in isolation, walk the chronological
+  // sequence and group consecutive samples that fall in the same power region into
+  // "segments" (ON events). This is standard edge/event-based NILM: a fridge shows
+  // many SHORT recurring segments, an AC/water-heater shows FEW LONG segments, an
+  // iron/kettle shows a single short high-power spike. Two readings with the same
+  // average power but different segment shapes are no longer treated as identical.
   const runNILM = async (rows: SheetAnalysis["rawRows"]) => {
     setLoadingNILM(true);
     setNilmDevices([]);
     try {
-      const regions = [
+      const regionDefs = [
         { region: "Region A", min: 0,    max: 400   },
         { region: "Region B", min: 400,  max: 800   },
         { region: "Region C", min: 800,  max: 1200  },
         { region: "Region D", min: 1200, max: 1700  },
         { region: "Region E", min: 1700, max: 99999 },
       ];
+      const regionOf = (p: number) => regionDefs.find(r => p >= r.min && p < r.max)?.region ?? regionDefs[regionDefs.length - 1].region;
 
-      const regionStats = regions.map(r => {
-        const matched = rows.filter(row => row.power >= r.min && row.power < r.max);
+      // Rows arrive already chronologically sorted from analyzeSheet, but sort
+      // defensively — segmentation is meaningless on an out-of-order sequence.
+      const sorted = [...rows].sort((a, b) => a.time.localeCompare(b.time));
+      if (sorted.length === 0) throw new Error("No data");
+
+      // Walk the sequence once and cut it into segments whenever the region changes.
+      type Segment = { region: string; length: number; stepIn: number };
+      const segments: Segment[] = [];
+      let curRegion = regionOf(sorted[0].power);
+      let curLen = 1;
+      for (let i = 1; i < sorted.length; i++) {
+        const region = regionOf(sorted[i].power);
+        if (region === curRegion) {
+          curLen++;
+        } else {
+          segments.push({ region: curRegion, length: curLen, stepIn: sorted[i - 1].power - sorted[i - curLen].power });
+          curRegion = region;
+          curLen = 1;
+        }
+      }
+      segments.push({ region: curRegion, length: curLen, stepIn: 0 });
+
+      const totalSpanDays = Math.max((sorted.length * SAMPLE_INTERVAL_SECONDS) / 86400, 1 / 24);
+
+      const regionStats = regionDefs.map(r => {
+        const matched = sorted.filter(row => row.power >= r.min && row.power < r.max);
         if (matched.length === 0) return null;
+        const ownSegments = segments.filter(s => s.region === r.region);
         const avgPower = Math.round(matched.reduce((s, x) => s + x.power, 0) / matched.length);
         const avgCurrent = parseFloat((matched.reduce((s, x) => s + x.current, 0) / matched.length).toFixed(2));
         const avgPF = parseFloat((matched.reduce((s, x) => s + x.powerFactor, 0) / matched.length).toFixed(2));
-        const percentage = Math.round((matched.length / rows.length) * 100);
-        return { region: r.region, avgPower, avgCurrent, avgPF, percentage };
-      }).filter(Boolean);
+        const percentage = Math.round((matched.length / sorted.length) * 100);
+        const avgDurationMin = parseFloat(((ownSegments.reduce((s, x) => s + x.length, 0) / ownSegments.length) * SAMPLE_INTERVAL_SECONDS / 60).toFixed(1));
+        const occurrencesPerDay = parseFloat((ownSegments.length / totalSpanDays).toFixed(1));
+        return { region: r.region, avgPower, avgCurrent, avgPF, percentage, avgDurationMin, occurrencesPerDay };
+      }).filter(Boolean) as { region: string; avgPower: number; avgCurrent: number; avgPF: number; percentage: number; avgDurationMin: number; occurrencesPerDay: number }[];
 
       // Build prompt — constrained by user's selected appliances
       const applianceWithCounts = appliances
@@ -252,13 +292,24 @@ REAL APPLIANCE POWER REFERENCE (use this to match regions accurately):
 - Space heater: 1500–2500W
 - Water pump: 1500–3000W
 
-IMPORTANT RULES:
-- Match each region to the appliance(s) whose NORMAL power consumption fits the avgPower of that region.
+Each region below is described by its POWER SIGNATURE **and** its TEMPORAL BEHAVIOR (from event
+segmentation of the raw time series, not just an average). Use both together:
+- avgDurationMin = average length of one continuous ON run in that region.
+- occurrencesPerDay = how many separate times per day that region gets entered.
+
+TEMPORAL REASONING RULES (apply BEFORE picking a device):
+- Long duration (>15 min) + few occurrences (<6/day) → continuous/thermostatic load (AC, water heater, oven, space heater).
+- Short duration (<3 min) + many occurrences (>10/day) → cycling load (fridge compressor cycling) or very quick-use device (kettle, iron, toaster).
+- Long duration (>60 min) + occurrences ≈ 1–2/day → always-on baseline (fridge overall envelope, standby/router, lighting in the evening).
+- Medium duration (3–15 min) + moderate occurrences (3–10/day) → manually operated appliance used a few times a day (microwave, washing machine cycle).
+- If temporal behavior contradicts the power-only guess (e.g. a "fridge-range" region with only 1 occurrence/day lasting 3 hours), trust the temporal pattern over the raw power reference table.
+
+MATCHING RULES:
+- Match each region to the appliance(s) whose power AND temporal behavior fit together.
 - Do NOT assign a refrigerator to a region above 300W unless no other match exists.
 - Each appliance should appear in ONLY ONE region (best match). Do not repeat.
-- Consider timeShare: high timeShare (>20%) means always-on devices (fridge, standby). Low timeShare (<10%) means occasional use (AC, oven).
 - For each region suggest 1 main appliance. Add a 2nd only if clearly different usage pattern.
-- Assign confidence: High (strong match), Medium (possible), Low (uncertain).
+- Assign confidence: High (power + temporal pattern both match), Medium (only one of the two matches well), Low (uncertain / conflicting signals).
 
 Reply ONLY with a JSON array, no extra text, no markdown:
 [
@@ -266,8 +317,8 @@ Reply ONLY with a JSON array, no extra text, no markdown:
   ...
 ]
 
-Electrical signatures from real home meter:
-${regionStats.map(r => `${r?.region}: avgPower=${r?.avgPower}W, avgCurrent=${r?.avgCurrent}A, powerFactor=${r?.avgPF}, timeShare=${r?.percentage}%`).join("\n")}`;
+Electrical + temporal signatures from real home meter:
+${regionStats.map(r => `${r.region}: avgPower=${r.avgPower}W, avgCurrent=${r.avgCurrent}A, powerFactor=${r.avgPF}, timeShare=${r.percentage}%, avgDuration=${r.avgDurationMin}min, occurrences=${r.occurrencesPerDay}/day`).join("\n")}`;
 
       const res = await fetch("/api/gemini", {
         method: "POST",
@@ -285,14 +336,39 @@ ${regionStats.map(r => `${r?.region}: avgPower=${r?.avgPower}W, avgCurrent=${r?.
         parsed = [];
       }
 
+      // Deterministic rule-based confidence check (no LLM involved): compare the
+      // estimated daily active minutes of the region (occurrences × duration) against
+      // the dailyHours the user declared for any matched appliance. This catches cases
+      // where the LLM's device label sounds plausible but the usage pattern doesn't
+      // actually match what the user told us about that appliance.
+      const selectedWithHours = appliances.filter(a => a.selected);
+      const adjustConfidence = (detectedDevices: string, llmConfidence: string, estimatedMinPerDay: number): string => {
+        const nameLc = detectedDevices.toLowerCase();
+        const match = selectedWithHours.find(a => nameLc.includes(a.label.toLowerCase()));
+        if (!match) return llmConfidence; // no declared appliance to check against
+        const declaredMinPerDay = (match.dailyHours ?? 2) * 60;
+        if (declaredMinPerDay <= 0) return llmConfidence;
+        const ratio = estimatedMinPerDay / declaredMinPerDay;
+        if (ratio >= 0.4 && ratio <= 2.5) return "High";   // usage pattern matches user's declared habits well
+        if (ratio >= 0.15 && ratio <= 5) return llmConfidence; // plausible, keep LLM's own assessment
+        return "Low"; // usage pattern strongly contradicts what the user declared
+      };
+
       const result: NILMDevice[] = regionStats.map(r => {
-        const match = parsed.find(p => p.region === r?.region);
+        const match = parsed.find(p => p.region === r.region);
+        const detectedDevices = match?.detectedDevices ?? "Unknown";
+        const estimatedMinPerDay = r.avgDurationMin * r.occurrencesPerDay;
+        const confidence = match
+          ? adjustConfidence(detectedDevices, match.confidence, estimatedMinPerDay)
+          : "Low";
         return {
-          region: r?.region ?? "",
-          percentage: r?.percentage ?? 0,
-          avgPower: r?.avgPower ?? 0,
-          detectedDevices: match?.detectedDevices ?? "Unknown",
-          confidence: match?.confidence ?? "Low",
+          region: r.region,
+          percentage: r.percentage,
+          avgPower: r.avgPower,
+          detectedDevices,
+          confidence,
+          avgDurationMin: r.avgDurationMin,
+          occurrencesPerDay: r.occurrencesPerDay,
         };
       });
 
@@ -936,7 +1012,12 @@ ${regionStats.map(r => `${r?.region}: avgPower=${r?.avgPower}W, avgCurrent=${r?.
                         <p className="text-xs font-bold text-emerald-600 whitespace-nowrap">~{monthlyCost} DA</p>
                       </div>
                     </div>
-                    <p className="text-[10px] text-gray-400 pl-9 mt-1">{d.percentage}% of total time active</p>
+                    <p className="text-[10px] text-gray-400 pl-9 mt-1">
+                      {d.percentage}% of total time active
+                      {typeof d.occurrencesPerDay === "number" && typeof d.avgDurationMin === "number" && (
+                        <> · ~{d.occurrencesPerDay}x/day · {d.avgDurationMin} min/run</>
+                      )}
+                    </p>
                   </div>
                   );
                 })}
