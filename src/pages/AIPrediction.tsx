@@ -292,7 +292,14 @@ Provide exactly 3 recommendations. Each must be specific, practical, and referen
         : Math.max((sorted.length * SAMPLE_INTERVAL_SECONDS) / 86400, 1 / 24);
 
       const regionStats = regionDefs.map(r => {
-        const matched = sorted.filter(row => row.power >= r.min && row.power < r.max);
+        // Use the SAME smoothed/debounced classification for both the power averages
+        // and the segment stats. Previously `matched` came from the raw (pre-debounce)
+        // threshold filter while `ownSegments` came from the debounced sequence — if
+        // debounce reassigned every instance of a region, matched.length could stay >0
+        // while ownSegments.length was 0, producing a 0/0 = NaN duration that got
+        // silently inserted into the Groq prompt (e.g. "avgDuration=NaNmin"), which is
+        // almost certainly why Groq gave up and returned an empty array.
+        const matched = sorted.filter((row, i) => regionSeq[i] === r.region);
         if (matched.length === 0) return null;
         const ownSegments = segments.filter(s => s.region === r.region);
         const avgPower = Math.round(matched.reduce((s, x) => s + x.power, 0) / matched.length);
@@ -300,8 +307,8 @@ Provide exactly 3 recommendations. Each must be specific, practical, and referen
         const avgPF = parseFloat((matched.reduce((s, x) => s + x.powerFactor, 0) / matched.length).toFixed(2));
         const percentage = Math.round((matched.length / sorted.length) * 100);
         const totalActiveSec = ownSegments.reduce((s, x) => s + x.durationSec, 0);
-        const avgDurationMin = parseFloat((totalActiveSec / ownSegments.length / 60).toFixed(1));
-        const occurrencesPerDay = parseFloat((ownSegments.length / totalSpanDays).toFixed(1));
+        const avgDurationMin = ownSegments.length > 0 ? parseFloat((totalActiveSec / ownSegments.length / 60).toFixed(1)) : 0;
+        const occurrencesPerDay = ownSegments.length > 0 ? parseFloat((ownSegments.length / totalSpanDays).toFixed(1)) : 0;
         return { region: r.region, avgPower, avgCurrent, avgPF, percentage, avgDurationMin, occurrencesPerDay };
       }).filter(Boolean) as { region: string; avgPower: number; avgCurrent: number; avgPF: number; percentage: number; avgDurationMin: number; occurrencesPerDay: number }[];
 
@@ -359,7 +366,7 @@ MATCHING RULES:
 - For each region suggest 1 main appliance. Add a 2nd only if clearly different usage pattern.
 - Assign confidence: High (power + temporal pattern both match), Medium (only one of the two matches well), Low (uncertain / conflicting signals).
 
-Reply ONLY with a JSON array, no extra text, no markdown:
+Reply ONLY with a JSON array, no extra text, no markdown. You MUST include exactly one object for EVERY region listed in the signatures below — never return an empty array, and never skip a region just because you are unsure; use confidence "Low" for uncertain guesses instead of omitting the region:
 [
   { "region": "Region A", "detectedDevices": "Refrigerator, Standby devices", "confidence": "High" },
   ...
