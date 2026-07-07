@@ -1117,49 +1117,49 @@ ${regionStats.map(r => `${r.region}: avgPower=${r.avgPower}W, avgCurrent=${r.avg
               </div>
             )}
             {nilmDevices.length > 0 && (
-              <div className="space-y-2 w-full overflow-hidden">
+              <div className="space-y-1.5 w-full overflow-hidden">
                 {/* Legend */}
-                <div className="flex items-center gap-3 px-1 pb-1 border-b border-gray-100">
-                  <span className="text-[10px] text-gray-400 font-semibold">W = Avg Power consumed</span>
-                  <span className="text-[10px] text-gray-300">|</span>
-                  <span className="text-[10px] text-gray-400 font-semibold">kWh = Monthly energy</span>
-                  <span className="text-[10px] text-gray-300">|</span>
-                  <span className="text-[10px] text-gray-400 font-semibold">DA = Est. cost</span>
+                <div className="flex items-center gap-2 px-1 pb-1 border-b border-gray-100">
+                  <span className="text-[9px] text-gray-400 font-semibold">W = Avg Power consumed</span>
+                  <span className="text-[9px] text-gray-300">|</span>
+                  <span className="text-[9px] text-gray-400 font-semibold">kWh = Monthly energy</span>
+                  <span className="text-[9px] text-gray-300">|</span>
+                  <span className="text-[9px] text-gray-400 font-semibold">DA = Est. cost</span>
                 </div>
                 {nilmDevices.map((d, i) => {
                   const monthlyKwh = parseFloat(((d.avgPower * (d.percentage / 100) * 24 * 30) / 1000).toFixed(1));
                   const monthlyCost = Math.round(monthlyKwh * 4.17);
                   return (
-                  <div key={i} className="p-2.5 rounded-xl bg-gray-50 hover:bg-cyan-50 transition-colors w-full overflow-hidden">
+                  <div key={i} className="p-1.5 rounded-lg bg-gray-50 hover:bg-cyan-50 transition-colors w-full overflow-hidden">
                     {/* Row 1: region + device + confidence */}
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0"
                         style={{ background: colors[i % colors.length] + "18" }}>
-                        <Zap className="w-3 h-3" style={{ color: colors[i % colors.length] }} />
+                        <Zap className="w-2.5 h-2.5" style={{ color: colors[i % colors.length] }} />
                       </div>
-                      <span className="text-xs font-bold text-gray-700 whitespace-nowrap">{d.region}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap flex-shrink-0"
+                      <span className="text-[11px] font-bold text-gray-700 whitespace-nowrap">{d.region}</span>
+                      <span className="text-[9px] px-1 py-0.5 rounded-full font-medium whitespace-nowrap flex-shrink-0"
                         style={{ background: confidenceColor(d.confidence) + "18", color: confidenceColor(d.confidence) }}>
                         {d.confidence}
                       </span>
-                      <p className="text-[11px] text-gray-500 truncate flex-1 min-w-0">{d.detectedDevices}</p>
+                      <p className="text-[10px] text-gray-500 truncate flex-1 min-w-0">{d.detectedDevices}</p>
                     </div>
                     {/* Row 2: metrics */}
-                    <div className="grid grid-cols-3 gap-1.5 pl-9">
-                      <div className="bg-white rounded-lg px-2 py-1.5 text-center border border-gray-100">
-                        <p className="text-[10px] text-gray-400 leading-none mb-0.5">Avg Power</p>
-                        <p className="text-xs font-bold text-gray-800 whitespace-nowrap">{d.avgPower} W</p>
+                    <div className="grid grid-cols-3 gap-1 pl-7">
+                      <div className="bg-white rounded-md px-1.5 py-1 text-center border border-gray-100">
+                        <p className="text-[9px] text-gray-400 leading-none mb-0.5">Avg Power</p>
+                        <p className="text-[11px] font-bold text-gray-800 whitespace-nowrap">{d.avgPower} W</p>
                       </div>
-                      <div className="bg-white rounded-lg px-2 py-1.5 text-center border border-gray-100">
-                        <p className="text-[10px] text-gray-400 leading-none mb-0.5">Monthly</p>
-                        <p className="text-xs font-bold text-blue-600 whitespace-nowrap">{monthlyKwh} kWh</p>
+                      <div className="bg-white rounded-md px-1.5 py-1 text-center border border-gray-100">
+                        <p className="text-[9px] text-gray-400 leading-none mb-0.5">Monthly</p>
+                        <p className="text-[11px] font-bold text-blue-600 whitespace-nowrap">{monthlyKwh} kWh</p>
                       </div>
-                      <div className="bg-white rounded-lg px-2 py-1.5 text-center border border-green-100">
-                        <p className="text-[10px] text-gray-400 leading-none mb-0.5">Est. Cost</p>
-                        <p className="text-xs font-bold text-emerald-600 whitespace-nowrap">~{monthlyCost} DA</p>
+                      <div className="bg-white rounded-md px-1.5 py-1 text-center border border-green-100">
+                        <p className="text-[9px] text-gray-400 leading-none mb-0.5">Est. Cost</p>
+                        <p className="text-[11px] font-bold text-emerald-600 whitespace-nowrap">~{monthlyCost} DA</p>
                       </div>
                     </div>
-                    <p className="text-[10px] text-gray-400 pl-9 mt-1">
+                    <p className="text-[9px] text-gray-400 pl-7 mt-0.5">
                       {d.percentage}% of total time active
                       {typeof d.occurrencesPerDay === "number" && typeof d.avgDurationMin === "number" && (
                         <> · ~{d.occurrencesPerDay}x/day · {d.avgDurationMin} min/run</>
@@ -1171,7 +1171,7 @@ ${regionStats.map(r => `${r.region}: avgPower=${r.avgPower}W, avgCurrent=${r.avg
                 <Button
                   onClick={() => runNILM(sheetData.rawRows)}
                   variant="outline"
-                  className="w-full h-8 text-xs text-cyan-600 border-cyan-200 hover:bg-cyan-50 mt-2"
+                  className="w-full h-7 text-[11px] text-cyan-600 border-cyan-200 hover:bg-cyan-50 mt-1.5"
                 >
                   Re-analyze
                 </Button>
