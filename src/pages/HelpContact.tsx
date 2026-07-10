@@ -258,7 +258,7 @@ function VEAMAssistant() {
       >
         <div
           className="rounded-2xl overflow-hidden border border-indigo-100 dark:border-indigo-900 bg-white dark:bg-gray-900 flex flex-col"
-          style={{ height: "520px" }}
+          style={{ height: "min(520px, calc(100vh - 140px))" }}
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 flex-shrink-0">
