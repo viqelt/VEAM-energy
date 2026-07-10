@@ -36,7 +36,7 @@ VEAM COMPLETE KNOWLEDGE BASE:
 - After login, enter your Device Serial Number found on the device box.
 
 2. HOME PAGE:
-- Real-time data every 3 seconds: Voltage (V), Current (A), Power (W), Power Factor, Frequency (Hz).
+- Real-time data every ~20 seconds: Voltage (V), Current (A), Power (W), Power Factor, Frequency (Hz).
 - Sonelgaz Dynamic Tarification: estimates monthly bill in real time based on current power.
 - Gas input: user manually enters the difference between current gas meter reading and last bill reading (in Thermies).
 - Data stored on Google Sheets automatically when WiFi is available. If offline, saved in device memory and uploaded when connection is restored. Manual "Upload Data from Device" button is also available.
@@ -56,14 +56,15 @@ VEAM COMPLETE KNOWLEDGE BASE:
 - Potential Savings: estimated savings if AI recommendations are followed.
 - AI Recommendations: 3 personalized energy-saving tips.
 - Stats: Daily Energy (kWh), Average Power (W), Peak Power (W), Peak Time.
-- Top Energy Consumers (NILM-Inspired): divides data into 5 power regions (A to E) and estimates likely appliance categories based on power signatures (Power, Current, Power Factor, usage time).
+- Top Energy Consumers (NILM-Inspired): divides data into 5 power regions (A to E), then uses event-based segmentation (real elapsed time between readings) to compute how long each region stays active per run (avg duration) and how many times per day it occurs — not just the average power.
   Region A: 0-400W (lights, chargers, routers)
   Region B: 400-800W (fans, small appliances)
   Region C: 800-1200W (computers, TVs, microwaves)
   Region D: 1200-1700W (washing machines, ovens)
   Region E: 1700W+ (air conditioners, water heaters, pumps)
-- NILM-Inspired Appliance Detection means estimating appliance categories from a single power cable using real electrical data (Power, PF, Current) and Groq AI inference. It is inspired by NILM methodology but uses LLM-based classification, not a trained ML model.
-- Before running the analysis: user must enter their home appliances (name, daily usage hours, quantity) to constrain and improve estimation accuracy.
+- NILM-Inspired Appliance Detection means estimating appliance categories from a single power cable using real electrical data (Power, PF, Current) PLUS temporal behavior (run duration, occurrences/day), combined with Groq AI inference and a deterministic rule engine. It is inspired by NILM methodology but uses LLM-based classification, not a trained ML model.
+- Rule engine (runs after Groq AI, no LLM involved): ensures no appliance is ever assigned to two regions at once, makes sure every appliance the user selected is placed somewhere even if Groq didn't mention it, and cross-checks each region's confidence against the appliance's declared daily usage hours.
+- Before running the analysis: user must enter their home appliances (name, daily usage hours, quantity) to constrain and improve estimation accuracy. This appliance list is now saved automatically in the browser, so the user doesn't need to re-enter it on every visit.
 - Each appliance shows: Average Power (W), Monthly Energy (kWh), Estimated Cost (DA).
 - Carbon Footprint: kg of CO2 per month and equivalent km driven by car.
 - Disclaimer: prediction is approximately 70-75% accurate and may vary.
@@ -88,7 +89,7 @@ VEAM COMPLETE KNOWLEDGE BASE:
 8. HELP & CONTACT PAGE:
 - Contact form: Name, Email, Message (response within 24 hours).
 - Email: viqsene@gmail.com
-- FAQ: Device connects via WiFi using ESP32. Data updates every 3 seconds. AI accuracy is 85-92%.
+- FAQ: Device connects via WiFi using ESP32. Data updates every ~20 seconds. AI accuracy is 85-92%.
 
 9. HARDWARE:
 - Device: ESP32 microcontroller + PZEM-004T V3.0 sensor.
@@ -101,7 +102,7 @@ RULES:
 - Use simple language for non-technical users.
 - Answer only VEAM-related questions. Redirect other topics politely.
 - Keep responses under 150 words unless truly needed.
-- Always say NILM-Inspired when referring to appliance detection. It uses Groq AI inference on real power signatures, not a trained ML model or dedicated NILM dataset.
+- Always say NILM-Inspired when referring to appliance detection. It combines real power + temporal signatures (Groq AI inference) with a deterministic rule engine (no duplicate appliances across regions, full appliance coverage, usage-based confidence check) — not a trained ML model or dedicated NILM dataset.
 - If unsure, say: please contact support at viqsene@gmail.com.`;
 
 // ─── Suggested Questions ──────────────────────────────────────────────────────
@@ -592,7 +593,7 @@ export default function HelpContact() {
               <CardContent className="space-y-3">
                 {[
                   { q: "How does the IoT device connect?", a: "Via WiFi using ESP32 microcontroller" },
-                  { q: "Is the data real-time?", a: "Yes, data updates every 3 seconds" },
+                  { q: "Is the data real-time?", a: "Yes, data updates every ~20 seconds" },
                   { q: "How accurate is AI prediction?", a: "Approximately 70-75% accuracy" },
                 ].map((faq, i) => (
                   <div key={i} className="p-3 rounded-lg bg-gray-50 dark:bg-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors">
