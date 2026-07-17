@@ -504,28 +504,21 @@ Rules: Explain voltage like water pressure in pipes — too low or too high is n
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* ── AI: Energy explanation ── */}
-      {loaded && stats && (
-        <Card className="border-0 shadow-sm overflow-hidden">
-          <div className="h-1 w-full bg-gradient-to-r from-indigo-400 to-purple-500" />
-          <CardContent className="py-3 px-4">
-            <div className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <Brain className="w-3.5 h-3.5 text-white" />
-              </div>
+          {/* AI: Energy explanation */}
+          {loaded && stats && (
+            <div className="mt-3 p-3 rounded-xl flex items-start gap-2" style={{background:"rgba(99,102,241,0.08)", border:"1px solid rgba(99,102,241,0.15)"}}>
+              <Brain className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
                 {aiEnergy ? (
                   <div className="flex items-start gap-1.5">
-                    <p className="text-xs text-gray-700 leading-relaxed flex-1">{aiEnergy}</p>
+                    <p className="text-[11px] text-gray-700 leading-relaxed flex-1">{aiEnergy}</p>
                     <button onClick={() => speak(aiEnergy)} className="flex-shrink-0 mt-0.5 text-indigo-400 hover:text-indigo-600 transition-colors" title="Read aloud">
-                      <Volume2 className="w-3.5 h-3.5" />
+                      <Volume2 className="w-3 h-3" />
                     </button>
                   </div>
                 ) : (
-                  <p className="text-xs text-gray-400">
+                  <p className="text-[11px] text-gray-400">
                     {loadingAiEnergy ? "⏳ Analyzing your consumption..." : "Tap to understand this chart in simple words."}
                   </p>
                 )}
@@ -533,15 +526,14 @@ Rules: Explain voltage like water pressure in pipes — too low or too high is n
               <button
                 onClick={explainEnergy}
                 disabled={loadingAiEnergy}
-                className="flex-shrink-0 flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors disabled:opacity-50"
+                className="flex-shrink-0 text-[10px] font-semibold px-2 py-1 rounded-full text-indigo-500 hover:text-indigo-400 transition-colors disabled:opacity-50 whitespace-nowrap" style={{background:"rgba(99,102,241,0.12)"}}
               >
-                <Sparkles className="w-3 h-3" />
-                {loadingAiEnergy ? "..." : aiEnergy ? "Refresh" : "Explain"}
+                {loadingAiEnergy ? "..." : aiEnergy ? "↺" : "✨ Explain"}
               </button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
       {/* ── Peak + Voltage row ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
