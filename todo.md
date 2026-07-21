@@ -55,16 +55,17 @@
 - [ ] Export energy reports as PDF
 - [ ] Deterministic local rule-based JS fallback for device classification (remove Groq API dependency for standard cases)
 - [ ] Multi-tenant data architecture: migrate from single shared Google Sheet to Firebase Firestore with per-user device pairing, enabling multiple customers to register and use isolated dashboards (required before productization)
+- [ ] Adaptive tariff optimization: recommend optimal operating times for high-power appliances based on Sonelgaz tariff periods and historical user behavior
 
 ### Agentic NILM (research direction — post-PFE scope)
-- [ ] **Phase 1 — Confidence-gated loop (minimal, defensible scope):** retry Groq analysis with additional context (previous days' data) when NILM confidence < 70%. Add basic sanity-check rules (e.g. flag implausible wattage readings) before triggering re-analysis. Keep 90%+ of pipeline local/rule-based, LLM only for low-confidence cases.
+- [ ] **Phase 1 — Confidence-gated loop (minimal, defensible scope):** retry Groq analysis with additional context (previous days' data) when NILM confidence < 70%. Add basic sanity-check rules (e.g. flag implausible wattage readings based on configurable appliance power ranges) before triggering re-analysis. Keep the majority of the pipeline local and deterministic, invoking the LLM only for ambiguous or low-confidence cases.
 - [ ] **Phase 2 — Multi-agent pipeline (larger vision, not recommended before PFE defense):**
   - Agent 1 — Data cleaning: removes noise/outliers from raw ESP32 readings before analysis
   - Agent 2 — NILM inference: runs appliance detection (current rule engine + Groq)
-  - Agent 3 — Result review: sanity-checks Agent 2's output against physical plausibility (e.g. rejects a fridge reading 1800W) and triggers re-analysis on contradiction
+  - Agent 3 — Result review: sanity-checks Agent 2's output against configurable appliance power ranges (e.g. flags an implausible fridge reading) and triggers re-analysis on contradiction
   - Agent 4 — Trend comparison: compares today's usage pattern against historical data (e.g. AC running 16h vs 4h last week) and triggers a user alert on significant deviation
-  - Agent 5 — Learning loop: if the user corrects a misclassification, update the local rule/confidence weights so future predictions improve without retraining the ML model
-  - Turns the system from a fixed LLM+rules pipeline into what's termed "Agentic NILM" / "Self-improving Energy Monitoring" — a stronger differentiator for a startup pitch than a PFE feature, given the added orchestration and testing complexity
+  - Agent 5 — Learning loop: if the user corrects a misclassification, update local rule/confidence weights to improve future inference, without immediately retraining the underlying ML model
+  - Moves the system toward an Agentic NILM architecture, where autonomous agents iteratively validate, refine, and improve appliance disaggregation results — not an established academic term, but a useful architectural direction and a stronger differentiator for a startup pitch than a PFE feature, given the added orchestration and testing complexity
 
 ---
 
