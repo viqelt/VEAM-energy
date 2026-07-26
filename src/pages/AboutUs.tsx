@@ -22,7 +22,7 @@ const teamMembers = [
   },
   {
     name: "Amina Touati",
-    role: "Master Automatic Control & Industrial Informatics",
+    role: "Master Automatic Control & Industrial Computing",
     email: "aminatouati732@gmail.com",
     gradient: "from-purple-500 to-pink-500",
     initials: "AT",
