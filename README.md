@@ -240,7 +240,7 @@ npm run dev
     <td align="center">
       <strong>Amina Touati</strong><br/>
       <a href="https://github.com/xalvirea">@xalvirea</a><br/>
-      Master — Automatic Control & Industrial Informatics<br/>
+      Master — Automatic Control & Industrial Computing<br/>
       University of Souk Ahras, Algeria
     </td>
   </tr>
