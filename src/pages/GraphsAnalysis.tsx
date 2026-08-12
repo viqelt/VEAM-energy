@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Cell,
-  Legend, ReferenceLine,
+  Legend, ReferenceLine, ComposedChart, Area,
 } from "recharts";
 import {
   TrendingUp, BarChart3, Zap, Clock, Database,
@@ -464,11 +464,15 @@ Rules: Explain voltage like water pressure in pipes — too low or too high is n
         <CardContent>
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={energyData} margin={{ top: 5, right: 10, left: -10, bottom: filter === "month" ? 20 : 5 }}>
+              <ComposedChart data={energyData} margin={{ top: 5, right: 10, left: -10, bottom: filter === "month" ? 20 : 5 }}>
                 <defs>
                   <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
                     <stop offset="0%"   stopColor="#6366F1" />
                     <stop offset="100%" stopColor="#8B5CF6" />
+                  </linearGradient>
+                  <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stopColor="#8B5CF6" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#8B5CF6" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
@@ -490,7 +494,18 @@ Rules: Explain voltage like water pressure in pipes — too low or too high is n
                 />
                 <Tooltip
                   contentStyle={{ backgroundColor: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "10px 14px" }}
-                  formatter={(v: number) => [`${v} ${yUnit}`, "Avg Power"]}
+                  formatter={(v: number, name: string) => name === "areaFill" ? null : [`${v} ${yUnit}`, "Avg Power"]}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="power"
+                  name="areaFill"
+                  stroke="none"
+                  fill="url(#areaGrad)"
+                  connectNulls
+                  dot={false}
+                  activeDot={false}
+                  legendType="none"
                 />
                 <Line
                   type="monotone"
@@ -501,7 +516,7 @@ Rules: Explain voltage like water pressure in pipes — too low or too high is n
                   connectNulls
                   activeDot={{ r: 5, fill: "#6366F1", stroke: "#fff", strokeWidth: 2 }}
                 />
-              </LineChart>
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
 
