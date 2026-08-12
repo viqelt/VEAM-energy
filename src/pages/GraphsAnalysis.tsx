@@ -498,9 +498,9 @@ Rules: Explain voltage like water pressure in pipes — too low or too high is n
                     const entry = payload.find((p: any) => p.name !== "areaFill");
                     if (!entry) return null;
                     return (
-                      <div style={{ backgroundColor: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "10px 14px" }}>
-                        <p style={{ margin: 0, marginBottom: 4, fontSize: 11, color: "#94A3B8" }}>{label}</p>
-                        <p style={{ margin: 0, fontSize: 12, color: "#334155", display: "flex", alignItems: "center", gap: 6 }}>
+                      <div className="recharts-default-tooltip" style={{ backgroundColor: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "10px 14px" }}>
+                        <p className="recharts-tooltip-label" style={{ margin: 0, marginBottom: 4, fontSize: 11, color: "#94A3B8" }}>{label}</p>
+                        <p className="recharts-tooltip-item" style={{ margin: 0, fontSize: 12, color: "#334155", display: "flex", alignItems: "center", gap: 6 }}>
                           <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", backgroundColor: "#6366F1" }} />
                           Avg Power : {entry.value} {yUnit}
                         </p>
