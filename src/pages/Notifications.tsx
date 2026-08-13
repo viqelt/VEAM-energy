@@ -208,10 +208,13 @@ function getDayKey(t: string): string {
   return t;
 }
 
-// Estimate a monthly bill (30 days) from today's readings:
+// Estimate a monthly ELECTRICITY CONSUMPTION COST (HT — before fixed
+// charges & taxes) from today's readings:
 //   1. estimateDailyKwh()  → time-weighted integration of Power over time (energyEstimate.ts)
 //   2. calcElecBill()      → real Sonelgaz tranche/rate logic (sonelgazTariffs.ts)
-// These two steps are intentionally separate — see energyEstimate.ts.
+// This matches "Montant en DA HT" (électricité) on a real Sonelgaz bill —
+// NOT the final "Net à payer TTC" (which adds redevances fixes, taxe
+// d'habitation, droit fixe, timbre and TVA — see BillCalculator.tsx for that).
 function estimateBillFromRows(rows: SheetRow[]): number {
   if (rows.length === 0) return 0;
   const lastDay = getDayKey(rows[rows.length - 1].time);
@@ -247,7 +250,12 @@ export default function Notifications() {
 
   // ── Live Power/Bill — read from Google Sheets, computed via shared Sonelgaz logic ──
   const [currentPower, setCurrentPower] = useState<number>(0); // W — latest reading
-  const [currentBill,  setCurrentBill]  = useState<number>(0); // DA — estimated monthly bill
+  // currentBill = estimated monthly ELECTRICITY CONSUMPTION COST (HT), i.e. only the
+  // kWh × Sonelgaz tranche rates (calcElecBill). It does NOT include redevances fixes,
+  // taxe d'habitation, droit fixe, timbre, or TVA — so it will always be lower than the
+  // final "Net à payer TTC" on a real Sonelgaz bill. See BillCalculator.tsx for the
+  // full TTC estimate with all fixed charges and taxes included.
+  const [currentBill,  setCurrentBill]  = useState<number>(0); // DA — elec. consumption cost, HT
   const [liveDataLoaded, setLiveDataLoaded] = useState(false);
 
   useEffect(() => {
@@ -375,9 +383,9 @@ export default function Notifications() {
       id: 9002,
       type: status === "red" ? "critical" : "warning",
       title: status === "red"
-        ? "Monthly bill limit exceeded!"
-        : "Approaching monthly bill limit",
-      description: "Estimated bill is " + currentBill + " DA — your limit is set to " + billLimit + " DA.",
+        ? "Electricity cost limit exceeded!"
+        : "Approaching electricity cost limit",
+      description: "Estimated electricity consumption cost (HT, before fixed charges & taxes) is " + currentBill + " DA — your limit is set to " + billLimit + " DA.",
       time: "Today, " + now,
     });
   }
@@ -502,7 +510,7 @@ export default function Notifications() {
                 <div className={"flex items-center gap-2.5 p-3 rounded-xl border " + s.border + " " + s.bg}>
                   <CircleDollarSign className={"w-4 h-4 flex-shrink-0 " + s.text} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-[10px] text-gray-400">Est. Bill</p>
+                    <p className="text-[10px] text-gray-400">Elec. Cost (HT)</p>
                     <p className={"text-sm font-bold " + s.text}>{currentBill} DA</p>
                     <p className="text-[10px] text-gray-400">
                       {billLimit > 0 ? "Limit: " + billLimit + " DA" : "No limit set"}
@@ -536,7 +544,7 @@ export default function Notifications() {
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
                     <CircleDollarSign className="w-3 h-3 text-violet-500" />
-                    Bill Limit (DA)
+                    Elec. Cost Limit (DA, HT)
                   </label>
                   <input
                     type="number"
