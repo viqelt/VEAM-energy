@@ -68,9 +68,11 @@ Using a **NILM-inspired approach**, Groq AI analyzes real power signatures (volt
 - **Carbon Footprint** — CO₂ kg/month + equivalent km driven by car
 
 ### 🔔 Smart Notifications
-- Set **Power Limit (W)** and **Bill Limit (DA)** thresholds
+- **Live Power & Electricity Cost** — read directly from Google Sheets (not simulated), with cost estimated via time-weighted energy integration + real Sonelgaz tranche rates (HT — see Bill Calculator for the full taxed estimate)
+- Set **Power Limit (W)** and **Electricity Cost Limit (DA, HT)** thresholds
 - Live alerts when limits are exceeded
 - **WhatsApp Alerts** — VEAM sends a WhatsApp message to your phone number when limits are exceeded (powered by Twilio)
+- **Device Connectivity Monitor** — detects when the ESP32 stops sending new readings (client-side check against the latest Google Sheets timestamp) and keeps a local history of past disconnections
 
 ### 🧮 Bill Calculator
 - Estimates electricity & gas bill using **official Sonelgaz 2024 tariffs**
@@ -177,7 +179,9 @@ veam-energy/
 │   │   ├── AboutUs.tsx        # Project info
 │   │   └── Profile.tsx        # User profile + report export
 │   ├── lib/
-│   │   └── mockData.ts        # Fallback data
+│   │   ├── mockData.ts          # Fallback data
+│   │   ├── sonelgazTariffs.ts   # Real Sonelgaz tranche/tax logic (shared by Bill Calculator & Notifications)
+│   │   └── energyEstimate.ts    # Time-weighted energy integration from raw Power readings
 │   └── components/ui/         # shadcn/ui components
 ├── vercel.json                # Vercel configuration
 └── package.json
@@ -224,6 +228,14 @@ npm run dev
 | Power Sensor | PZEM-004T V3.0 | Measures V, I, P, PF, Freq, kWh |
 | Clamp | Open CT Sensor | Non-invasive current measurement |
 | Data Storage | Google Sheets | Cloud backend |
+
+---
+
+## 🗺️ Roadmap / Future Work
+
+The current release focuses on the core PFE deliverable: real IoT data, NILM-inspired AI classification, and Sonelgaz billing accuracy. The following is planned as a post-defense evolution toward the VEAM startup, not part of the current core system:
+
+- **24/7 Device Health Monitoring via n8n** — the current Device Connectivity Monitor only runs while the dashboard is open (client-side check). An n8n workflow polling Google Sheets independently would detect ESP32 disconnections even when no one has the dashboard open, and trigger a WhatsApp alert automatically.
 
 ---
 
