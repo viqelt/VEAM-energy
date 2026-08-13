@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle, AlertCircle, Info, Clock, Settings, Zap, CircleDollarSign, Save, MessageCircle, Phone, Wifi, WifiOff, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { calcElecBill } from "@/lib/sonelgazTariffs";
+import { estimateDailyKwh } from "@/lib/energyEstimate";
 
 type NotificationType = "critical" | "warning" | "info";
 
@@ -207,15 +208,16 @@ function getDayKey(t: string): string {
   return t;
 }
 
-// Estimate a monthly bill (30 days) from today's average power reading,
-// using the same Sonelgaz tranche/rate logic as BillCalculator.tsx.
+// Estimate a monthly bill (30 days) from today's readings:
+//   1. estimateDailyKwh()  → time-weighted integration of Power over time (energyEstimate.ts)
+//   2. calcElecBill()      → real Sonelgaz tranche/rate logic (sonelgazTariffs.ts)
+// These two steps are intentionally separate — see energyEstimate.ts.
 function estimateBillFromRows(rows: SheetRow[]): number {
   if (rows.length === 0) return 0;
   const lastDay = getDayKey(rows[rows.length - 1].time);
   const todayRows = rows.filter((r) => getDayKey(r.time) === lastDay);
   const sample = todayRows.length > 0 ? todayRows : rows;
-  const avgPower = sample.reduce((sum, r) => sum + r.power, 0) / sample.length;
-  const dailyKwh = (avgPower * 24) / 1000;
+  const dailyKwh = estimateDailyKwh(sample);
   return calcElecBill(dailyKwh, 30);
 }
 
