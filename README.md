@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="logo.jpeg" alt="VEAM Logo" width="80"/>
+<img public="logo.jpeg" alt="VEAM Logo" width="80"/>
 
 # ⚡ VEAM — Visual Energy Analytics & Monitoring
 
