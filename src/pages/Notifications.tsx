@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertTriangle, AlertCircle, Info, Clock, Settings, Zap, CircleDollarSign, Save, MessageCircle, Phone } from "lucide-react";
+import { AlertTriangle, AlertCircle, Info, Clock, Settings, Zap, CircleDollarSign, Save, MessageCircle, Phone, Wifi, WifiOff, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type NotificationType = "critical" | "warning" | "info";
@@ -128,6 +128,63 @@ async function sendWhatsApp(phone: string, message: string): Promise<boolean> {
   }
 }
 
+// ── Device Connectivity monitoring ──────────────────────────────────────────
+// Reads the same Google Sheet used by GraphsAnalysis.tsx and checks how old
+// the latest reading is. This is a client-side check only (works while the
+// dashboard is open). Designed so a future n8n + dedicated "DeviceStatus"
+// Sheet tab can replace this fetch without changing the UI below.
+const DEVICE_SHEET_ID = "1g9XRplcjctpLaOnxmsy7C_0o8dc9Yy4-Zny6m7XSyXg";
+const DEVICE_SHEET_URL = `https://docs.google.com/spreadsheets/d/${DEVICE_SHEET_ID}/gviz/tq?tqx=out:csv`;
+const OFFLINE_THRESHOLD_MIN = 15; // minutes without a new reading = offline
+const DEVICE_POLL_MS = 60_000; // re-check every 60s while page is open
+const DEVICE_HISTORY_KEY = "veam_device_history";
+const DEVICE_HISTORY_LIMIT = 10;
+
+type DeviceStatus = "online" | "offline" | "unknown";
+
+interface DeviceHistoryEntry {
+  id: string;
+  offlineAt: string;    // ISO timestamp when device went offline
+  reconnectedAt: string | null; // ISO timestamp when it came back (null = still offline)
+  durationMin: number | null;   // null while ongoing
+}
+
+// Parse "YYYY-MM-DD HH:MM:SS" (or similar) from the sheet into a Date
+function parseSheetTimestamp(t: string): Date | null {
+  if (!t) return null;
+  const iso = t.trim().replace(" ", "T");
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function loadDeviceHistory(): DeviceHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(DEVICE_HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveDeviceHistory(entries: DeviceHistoryEntry[]) {
+  localStorage.setItem(DEVICE_HISTORY_KEY, JSON.stringify(entries.slice(0, DEVICE_HISTORY_LIMIT)));
+}
+
+function formatMinutesAgo(minutes: number): string {
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return Math.round(minutes) + " min ago";
+  const hours = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  return hours + "h " + mins + "min ago";
+}
+
+function formatDuration(minutes: number): string {
+  if (minutes < 60) return Math.round(minutes) + " min";
+  const hours = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  return hours + "h " + mins + "min";
+}
+
 export default function Notifications() {
   // ── Alert limits (persisted in localStorage) ─────────────────────────────
   const [powerLimit, setPowerLimit]   = useState<number>(0);
@@ -144,6 +201,14 @@ export default function Notifications() {
   const [phoneInput,      setPhoneInput]      = useState<string>("");
   const lastSentRef = useRef<Record<string, number>>({});
 
+  // ── Device connectivity state ───────────────────────────────────────────
+  const [deviceStatus,  setDeviceStatus]  = useState<DeviceStatus>("unknown");
+  const [lastSeen,      setLastSeen]      = useState<Date | null>(null);
+  const [deviceHistory, setDeviceHistory] = useState<DeviceHistoryEntry[]>([]);
+  const [deviceLoading, setDeviceLoading] = useState(false);
+  const [nowTick,       setNowTick]       = useState(() => Date.now());
+  const prevStatusRef = useRef<DeviceStatus>("unknown");
+
   // Simulated current values (in a real app these come from Google Sheets)
   const currentPower = 1850; // W  — peak power from dashboard
   const currentBill  = 2593; // DA — estimated monthly bill
@@ -157,6 +222,73 @@ export default function Notifications() {
     if (b) { setBillLimit(Number(b));  setBillInput(b);  }
     if (w) { setWhatsappPhone(w); setPhoneInput(w); }
     if (e) { setWhatsappEnabled(e === "true"); }
+    setDeviceHistory(loadDeviceHistory());
+  }, []);
+
+  // ── Check device connectivity: fetch latest reading, detect on/offline ───
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkDevice = async () => {
+      setDeviceLoading(true);
+      try {
+        const res = await fetch(DEVICE_SHEET_URL);
+        const text = await res.text();
+        const lines = text.trim().split("\n");
+        const lastLine = lines[lines.length - 1] || "";
+        const firstCol = lastLine.split(",")[0]?.replace(/"/g, "").trim() || "";
+        const ts = parseSheetTimestamp(firstCol);
+        if (cancelled || !ts) { setDeviceLoading(false); return; }
+
+        setLastSeen(ts);
+        const minutesAgo = (Date.now() - ts.getTime()) / 60000;
+        const status: DeviceStatus = minutesAgo <= OFFLINE_THRESHOLD_MIN ? "online" : "offline";
+        setDeviceStatus(status);
+
+        // ── Detect transitions and update history ───────────────────────
+        const prev = prevStatusRef.current;
+        if (prev !== "unknown" && prev !== status) {
+          const current = loadDeviceHistory();
+          if (status === "offline") {
+            // went offline: open a new ongoing entry
+            const entry: DeviceHistoryEntry = {
+              id: String(Date.now()),
+              offlineAt: ts.toISOString(),
+              reconnectedAt: null,
+              durationMin: null,
+            };
+            const updated = [entry, ...current];
+            saveDeviceHistory(updated);
+            setDeviceHistory(updated);
+          } else {
+            // came back online: close the most recent ongoing entry
+            const idx = current.findIndex((h) => h.durationMin === null);
+            if (idx !== -1) {
+              const offlineAt = new Date(current[idx].offlineAt);
+              const durationMin = Math.round((Date.now() - offlineAt.getTime()) / 60000);
+              current[idx] = { ...current[idx], reconnectedAt: new Date().toISOString(), durationMin };
+              saveDeviceHistory(current);
+              setDeviceHistory([...current]);
+            }
+          }
+        }
+        prevStatusRef.current = status;
+      } catch {
+        if (!cancelled) setDeviceStatus("unknown");
+      } finally {
+        if (!cancelled) setDeviceLoading(false);
+      }
+    };
+
+    checkDevice();
+    const interval = setInterval(checkDevice, DEVICE_POLL_MS);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+  // ── Tick every 30s so "X min ago" labels stay fresh without refetching ───
+  useEffect(() => {
+    const tick = setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => clearInterval(tick);
   }, []);
 
   const saveAlerts = () => {
@@ -439,6 +571,97 @@ export default function Notifications() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── Device Connectivity Card ───────────────────────────────────────── */}
+      {(() => {
+        const minutesAgo = lastSeen ? (nowTick - lastSeen.getTime()) / 60000 : null;
+        const isOnline = deviceStatus === "online";
+        const isOffline = deviceStatus === "offline";
+        const statusColor = isOnline ? "green" : isOffline ? "red" : "gray";
+        const dotClass = isOnline ? "bg-green-500" : isOffline ? "bg-red-500" : "bg-gray-300";
+        const textClass = isOnline ? "text-green-700 dark:text-green-400" : isOffline ? "text-red-700 dark:text-red-400" : "text-gray-500 dark:text-gray-400";
+        const bgClass = isOnline ? "bg-green-50 dark:bg-green-950/30" : isOffline ? "bg-red-50 dark:bg-red-950/30" : "bg-gray-50 dark:bg-slate-800/50";
+        const borderClass = isOnline ? "border-green-200 dark:border-green-900" : isOffline ? "border-red-200 dark:border-red-900" : "border-gray-200 dark:border-slate-700";
+        const StatusIcon = isOnline ? Wifi : WifiOff;
+
+        return (
+          <Card className="border-0 shadow-md shadow-gray-100 dark:shadow-none overflow-hidden dark:bg-slate-900">
+            <div className="h-1.5 w-full bg-gradient-to-r from-cyan-500 to-blue-600" />
+            <CardHeader className="pb-3 flex flex-row items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center flex-shrink-0">
+                <StatusIcon className="w-4 h-4 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <CardTitle className="text-sm font-semibold text-gray-900 dark:text-white">Device Connectivity</CardTitle>
+                <p className="text-xs text-gray-400">ESP32 sensor connection status</p>
+              </div>
+              {deviceLoading && <span className="text-[10px] text-gray-400 animate-pulse">Checking…</span>}
+            </CardHeader>
+
+            <CardContent className="pt-0 space-y-3">
+              {/* ── Current status ── */}
+              <div className={"flex items-center gap-2.5 p-3 rounded-xl border " + borderClass + " " + bgClass}>
+                <StatusIcon className={"w-4 h-4 flex-shrink-0 " + textClass} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] text-gray-400">
+                    {isOnline ? "Connected" : isOffline ? "Disconnected" : "Checking connection"}
+                  </p>
+                  <p className={"text-sm font-bold " + textClass}>
+                    {isOnline && "Device Online 🟢"}
+                    {isOffline && "Device Offline 🔴"}
+                    {deviceStatus === "unknown" && "Waiting for data…"}
+                  </p>
+                  <p className="text-[10px] text-gray-400">
+                    {minutesAgo !== null
+                      ? "Last reading: " + formatMinutesAgo(minutesAgo)
+                      : "No data yet"}
+                  </p>
+                </div>
+                <div className={"w-2.5 h-2.5 rounded-full flex-shrink-0 " + dotClass + (isOffline ? " animate-pulse" : "")} />
+              </div>
+
+              {/* ── History log ── */}
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <History className="w-3.5 h-3.5" />
+                  Recent disconnections
+                </p>
+                {deviceHistory.length === 0 ? (
+                  <p className="text-[11px] text-gray-400 px-1">No disconnections recorded yet.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {deviceHistory.slice(0, 5).map((h) => (
+                      <div
+                        key={h.id}
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-gray-50 dark:bg-slate-800/50 border border-gray-100 dark:border-slate-700"
+                      >
+                        <WifiOff className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] text-gray-600 dark:text-gray-300">
+                            {new Date(h.offlineAt).toLocaleString("fr-DZ", {
+                              day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+                            })}
+                          </p>
+                        </div>
+                        <span className={"text-[10px] font-semibold px-2 py-0.5 rounded-full " +
+                          (h.durationMin === null
+                            ? "bg-red-100 text-red-700"
+                            : "bg-gray-200 text-gray-600 dark:bg-slate-700 dark:text-gray-300")
+                        }>
+                          {h.durationMin === null ? "Ongoing" : formatDuration(h.durationMin)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[10px] text-gray-400 px-1 pt-1">
+                  Tracked while this page is open · powered by n8n coming soon for 24/7 monitoring
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* ── Notification List ──────────────────────────────────────────────── */}
       <div className="space-y-3">
