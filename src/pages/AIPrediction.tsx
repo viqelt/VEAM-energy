@@ -637,7 +637,7 @@ ${regionStats.map(r => `${r.region}: avgPower=${r.avgPower}W, avgCurrent=${r.avg
 
       const recommendations = [
         { icon: "⚡", title: "Reduce Peak Hours Usage", description: `Peak at ${peakRow.time} — ${peakRow.power}W detected. Shift high-power tasks to off-peak hours.`, savings: Math.round(estimatedBill * 0.1) },
-        { icon: "🕐", title: "Avoid the 17:00 – 21:00 Window", description: "Sonelgaz applies higher tariffs during peak demand hours (5 PM – 9 PM). Postpone your washing machine, oven, iron, and water heater to before 5 PM or after 9 PM to reduce your bill noticeably.", savings: Math.round(estimatedBill * 0.15) },
+        { icon: "🔥", title: "Manage High-Draw Appliances", description: "Water heaters, ovens, and irons are among the biggest energy consumers in the home. Limit their use to when truly needed, unplug them fully after use, and avoid running several high-power appliances at the same time to lower your overall consumption.", savings: Math.round(estimatedBill * 0.15) },
         { icon: "🔌", title: `Optimize ${topDevices[0]?.name}`, description: `${topDevices[0]?.name} consumes ${topDevices[0]?.percentage}% of total energy. Consider scheduling.`, savings: Math.round(estimatedBill * 0.12) },
         { icon: "❄️", title: "AC Optimization", description: "Set AC to 24°C instead of 20°C to reduce consumption by 25%.", savings: Math.round(estimatedBill * 0.08) },
         { icon: "💡", title: "Switch to LED Lighting", description: "LED bulbs consume 75% less energy than traditional bulbs.", savings: Math.round(estimatedBill * 0.05) },
