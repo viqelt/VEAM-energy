@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle, AlertCircle, Info, Clock, Settings, Zap, CircleDollarSign, Save, MessageCircle, Phone, Wifi, WifiOff, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { calcElecBill } from "@/lib/sonelgazTariffs";
 
 type NotificationType = "critical" | "warning" | "info";
 
@@ -185,6 +186,39 @@ function formatDuration(minutes: number): string {
   return hours + "h " + mins + "min";
 }
 
+// ── Live Power/Bill from the same Sheet ─────────────────────────────────────
+// Column order matches GraphsAnalysis.tsx: time, voltage, current, power, powerFactor, frequency
+interface SheetRow { time: string; power: number; }
+
+function parseSheetRows(text: string): SheetRow[] {
+  const lines = text.trim().split("\n");
+  const rows: SheetRow[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(",").map((c) => c.replace(/"/g, "").trim());
+    if (cols.length >= 4) {
+      rows.push({ time: cols[0], power: parseFloat(cols[3]) || 0 });
+    }
+  }
+  return rows;
+}
+
+function getDayKey(t: string): string {
+  if (t.length >= 10 && t.includes("-")) return t.substring(0, 10);
+  return t;
+}
+
+// Estimate a monthly bill (30 days) from today's average power reading,
+// using the same Sonelgaz tranche/rate logic as BillCalculator.tsx.
+function estimateBillFromRows(rows: SheetRow[]): number {
+  if (rows.length === 0) return 0;
+  const lastDay = getDayKey(rows[rows.length - 1].time);
+  const todayRows = rows.filter((r) => getDayKey(r.time) === lastDay);
+  const sample = todayRows.length > 0 ? todayRows : rows;
+  const avgPower = sample.reduce((sum, r) => sum + r.power, 0) / sample.length;
+  const dailyKwh = (avgPower * 24) / 1000;
+  return calcElecBill(dailyKwh, 30);
+}
+
 export default function Notifications() {
   // ── Alert limits (persisted in localStorage) ─────────────────────────────
   const [powerLimit, setPowerLimit]   = useState<number>(0);
@@ -209,9 +243,10 @@ export default function Notifications() {
   const [nowTick,       setNowTick]       = useState(() => Date.now());
   const prevStatusRef = useRef<DeviceStatus>("unknown");
 
-  // Simulated current values (in a real app these come from Google Sheets)
-  const currentPower = 1850; // W  — peak power from dashboard
-  const currentBill  = 2593; // DA — estimated monthly bill
+  // ── Live Power/Bill — read from Google Sheets, computed via shared Sonelgaz logic ──
+  const [currentPower, setCurrentPower] = useState<number>(0); // W — latest reading
+  const [currentBill,  setCurrentBill]  = useState<number>(0); // DA — estimated monthly bill
+  const [liveDataLoaded, setLiveDataLoaded] = useState(false);
 
   useEffect(() => {
     const p = localStorage.getItem("veam_power_limit");
@@ -234,6 +269,15 @@ export default function Notifications() {
       try {
         const res = await fetch(DEVICE_SHEET_URL);
         const text = await res.text();
+
+        // ── Live Power/Bill (same fetch, no extra request) ─────────────
+        const rows = parseSheetRows(text);
+        if (!cancelled && rows.length > 0) {
+          setCurrentPower(rows[rows.length - 1].power);
+          setCurrentBill(estimateBillFromRows(rows));
+          setLiveDataLoaded(true);
+        }
+
         const lines = text.trim().split("\n");
         const lastLine = lines[lines.length - 1] || "";
         const firstCol = lastLine.split(",")[0]?.replace(/"/g, "").trim() || "";
@@ -410,7 +454,14 @@ export default function Notifications() {
             <Settings className="w-4 h-4 text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <CardTitle className="text-sm font-semibold text-gray-900">Alert Thresholds</CardTitle>
+            <CardTitle className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+              Alert Thresholds
+              {liveDataLoaded && (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">
+                  Live ●
+                </span>
+              )}
+            </CardTitle>
             <p className="text-xs text-gray-400">Set your power and bill limits</p>
           </div>
           <button
