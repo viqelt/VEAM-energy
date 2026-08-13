@@ -75,7 +75,7 @@ Using a **NILM-inspired approach**, Groq AI analyzes real power signatures (volt
 - **Device Connectivity Monitor** — detects when the ESP32 stops sending new readings (client-side check against the latest Google Sheets timestamp) and keeps a local history of past disconnections
 
 ### 🧮 Bill Calculator
-- Estimates electricity & gas bill using **official Sonelgaz 2024 tariffs**
+- Estimates electricity & gas bills using **Sonelgaz tariff rates implemented in VEAM**
 - Supports 1 Month / 2 Months / Trimestre (~70 day) billing periods
 - Full breakdown: all tranches + TVA 9%/19% + Redevances Fixes + all taxes
 
