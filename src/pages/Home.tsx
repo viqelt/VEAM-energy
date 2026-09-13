@@ -56,22 +56,13 @@ export default function HomePage() {
   const [gasTh, setGasTh] = useState(150);
   const [includeGas, setIncludeGas] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "loading" | "success">("idle");
-  const [lastUpdate, setLastUpdate] = useState(0);
   const [showBuyModal, setShowBuyModal] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentPower(getRealtimePower());
-      setLastUpdate(0);
     }, 3000);
     return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const tick = setInterval(() => {
-      setLastUpdate((prev) => prev + 1);
-    }, 1000);
-    return () => clearInterval(tick);
   }, []);
 
   // Sonelgaz gas — prorata sur 70 jours (vérifié sur facture réelle)
@@ -317,31 +308,6 @@ export default function HomePage() {
           ))}
         </div>
       </div>
-
-      {/* Status Indicator */}
-      <Card className="border-0 shadow-sm shadow-gray-100 hover:shadow-md transition-all duration-300">
-        <CardContent className="p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center shadow-sm">
-              <Wifi className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-semibold text-gray-900">Status:</span>
-                <span className="text-sm font-semibold text-green-600">Connected</span>
-                <CheckCircle2 className="w-4 h-4 text-green-500" />
-              </div>
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                Last Update: <span className="font-medium text-gray-500">{lastUpdate} sec ago</span>
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse" />
-            <span className="text-xs text-green-600 font-medium hidden sm:inline">Live</span>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Bottom Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
