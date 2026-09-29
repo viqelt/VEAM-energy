@@ -38,7 +38,7 @@
 
 **VEAM** (Visual Energy Analytics & Monitoring) is a full-stack smart home energy monitoring system developed as a Master 2 graduation project.
 
-The system combines **real IoT hardware** (ESP32 + PZEM-004T) with an **AI-powered web dashboard** to give Algerian households real-time insights into their electricity consumption, estimated Sonelgaz bills, and appliance-level energy analysis — all from a single current clamp sensor.
+The system combines **real IoT hardware** (ESP32 + PZEM-004T) with an **AI-powered web dashboard** to give Algerian households real-time insights into their electricity consumption, estimated Sonelgaz bills, and appliance-level energy estimates — all from a single current clamp sensor.
 
 Using a **NILM-inspired approach**, Groq AI analyzes real power signatures (voltage, current, power factor) and estimates which appliances are likely running — without requiring a separate sensor on each device.
 
@@ -64,7 +64,7 @@ Using a **NILM-inspired approach**, Groq AI analyzes real power signatures (volt
 - **Estimated Monthly Bill** — projects cost based on current consumption rate
 - **Potential Savings** — estimates savings if AI recommendations are followed
 - **NILM-Inspired Appliance Detection** — segments live data into 5 power regions (A→E) using real event-based segmentation (actual elapsed time between readings, noise-debounced), then Groq AI + a deterministic rule engine infer which appliances are active — no appliance duplicated across regions, every user-selected appliance placed somewhere, confidence cross-checked against declared daily usage
-- **ΔP-based Event Detection (Aggregate Load Events)** — detects sustained power changes (ΔP = P_current − P_previous) in the aggregate signal locally, before the LLM call, and sends only compact event summaries to Groq AI (no raw samples, so no extra token cost). Events are treated as evidence about overlapping loads, never as automatic appliance labels
+- **ΔP-based Event Detection (Aggregate Load Events)** — detects sustained power changes (ΔP = P_current − P_previous) in the aggregate signal locally, before the LLM call, and sends only compact event summaries to Groq AI instead of raw samples, which reduces prompt size and token usage. Events are treated as evidence about overlapping loads, never as automatic appliance labels
 - **Groq AI Recommendations** — 3 personalized energy-saving tips
 - **Carbon Footprint** — CO₂ kg/month + equivalent km driven by car
 
@@ -139,10 +139,11 @@ Real Electrical Data (1 reading every 20 seconds via ESP32)
      • confidence cross-checked against the appliance's
        declared daily usage hours (final validation)
                           ↓
-    Output: Appliance · Avg Power · Monthly kWh · Est. Cost DA
+    Output per region: Candidate appliances · Avg Power ·
+    Monthly kWh · Est. Cost DA (region-level estimates)
 ```
 
-> **Note:** This is a NILM-*inspired* hybrid approach: appliance classification combines real event-based signal segmentation (ΔP event detection, edge detection, run duration, occurrence frequency) with Groq AI (LLM-based inference) and a deterministic rule engine for de-duplication, full appliance coverage, and usage-based confidence scoring — not a trained ML model or dedicated NILM dataset. It is best described as *AI-assisted power + temporal signature analysis with rule-based validation*. A ΔP event is a step in the **aggregate** power ("about X W of load appeared"), not an appliance identification, and confidence stays qualitative (High / Medium / Low) — no numeric probability is claimed.
+> **Note:** This is a NILM-*inspired* hybrid approach: appliance classification combines real event-based signal segmentation (ΔP event detection, edge detection, run duration, occurrence frequency) with Groq AI (LLM-based inference) and a deterministic rule engine for de-duplication, full appliance coverage, and usage-based confidence scoring — not a trained ML model or dedicated NILM dataset. The "one appliance per region" rule is an algorithmic constraint of VEAM to avoid duplicate classification, not a physical property of appliances (an appliance's power can vary between regions), and the monthly kWh / cost figures are aggregate **region-level estimates**, not measured per-appliance energy. It is best described as *AI-assisted power + temporal signature analysis with rule-based validation*. A ΔP event is a step in the **aggregate** power ("about X W of load appeared"), not an appliance identification, and confidence stays qualitative (High / Medium / Low) — no numeric probability is claimed.
 
 ---
 
