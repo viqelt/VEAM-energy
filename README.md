@@ -64,6 +64,7 @@ Using a **NILM-inspired approach**, Groq AI analyzes real power signatures (volt
 - **Estimated Monthly Bill** — projects cost based on current consumption rate
 - **Potential Savings** — estimates savings if AI recommendations are followed
 - **NILM-Inspired Appliance Detection** — segments live data into 5 power regions (A→E) using real event-based segmentation (actual elapsed time between readings, noise-debounced), then Groq AI + a deterministic rule engine infer which appliances are active — no appliance duplicated across regions, every user-selected appliance placed somewhere, confidence cross-checked against declared daily usage
+- **ΔP-based Event Detection (Aggregate Load Events)** — detects sustained power changes (ΔP = P_current − P_previous) in the aggregate signal locally, before the LLM call, and sends only compact event summaries to Groq AI (no raw samples, so no extra token cost). Events are treated as evidence about overlapping loads, never as automatic appliance labels
 - **Groq AI Recommendations** — 3 personalized energy-saving tips
 - **Carbon Footprint** — CO₂ kg/month + equivalent km driven by car
 
@@ -94,7 +95,7 @@ Using a **NILM-inspired approach**, Groq AI analyzes real power signatures (volt
 | **Styling** | Tailwind CSS + shadcn/ui |
 | **Charts** | Recharts |
 | **AI Engine** | Groq AI — GPT-OSS 120B |
-| **NILM-Inspired** | Event-based segmentation + Groq AI inference + deterministic rule engine |
+| **NILM-Inspired** | Event-based power segmentation (ΔP event detection) + Groq AI inference + deterministic rule engine |
 | **WhatsApp Alerts** | Twilio WhatsApp Sandbox API |
 | **Backend API** | Vercel Edge Runtime (serverless functions) |
 | **Data Source** | Google Sheets API (real ESP32 data) |
@@ -117,23 +118,31 @@ Real Electrical Data (1 reading every 20 seconds via ESP32)
      Real elapsed time between timestamps + single-sample
      noise debounce → avg run duration (min) & occurrences/day
                           ↓
+     ΔP-based Event Detection (local, before the LLM)
+     ΔP = P_current − P_previous · adaptive noise threshold
+     → Aggregate Load Events (ON / OFF / CHANGE) → power
+     segments → ΔP clusters + overlap with already-running loads
+                          ↓
     User provides appliance list + expected usage hours
                           ↓
      Groq AI analyzes power signature AND temporal behavior
      per region (duration + frequency of ON events — not
-     just average power) against the declared appliance list
+     just average power) plus the ΔP event summary, against
+     the declared appliance list
                           ↓
      Deterministic rule engine (no LLM involved):
      • no appliance ever claimed by more than one region
      • every user-selected appliance placed somewhere,
        even if Groq never mentioned it
+     • event evidence: overlapping ON steps can only lower
+       High → Medium (never raise confidence)
      • confidence cross-checked against the appliance's
-       declared daily usage hours
+       declared daily usage hours (final validation)
                           ↓
     Output: Appliance · Avg Power · Monthly kWh · Est. Cost DA
 ```
 
-> **Note:** This is a NILM-*inspired* hybrid approach: appliance classification combines real event-based signal segmentation (edge detection, run duration, occurrence frequency) with Groq AI (LLM-based inference) and a deterministic rule engine for de-duplication, full appliance coverage, and usage-based confidence scoring — not a trained ML model or dedicated NILM dataset. It is best described as *AI-assisted power + temporal signature analysis with rule-based validation*.
+> **Note:** This is a NILM-*inspired* hybrid approach: appliance classification combines real event-based signal segmentation (ΔP event detection, edge detection, run duration, occurrence frequency) with Groq AI (LLM-based inference) and a deterministic rule engine for de-duplication, full appliance coverage, and usage-based confidence scoring — not a trained ML model or dedicated NILM dataset. It is best described as *AI-assisted power + temporal signature analysis with rule-based validation*. A ΔP event is a step in the **aggregate** power ("about X W of load appeared"), not an appliance identification, and confidence stays qualitative (High / Medium / Low) — no numeric probability is claimed.
 
 ---
 
@@ -181,7 +190,8 @@ veam-energy/
 │   ├── lib/
 │   │   ├── mockData.ts          # Fallback data
 │   │   ├── sonelgazTariffs.ts   # Real Sonelgaz tranche/tax logic (shared by Bill Calculator & Notifications)
-│   │   └── energyEstimate.ts    # Time-weighted energy integration from raw Power readings
+│   │   ├── energyEstimate.ts    # Time-weighted energy integration from raw Power readings
+│   │   └── eventSegmentation.ts # ΔP-based event detection, power segments & event features for NILM
 │   └── components/ui/         # shadcn/ui components
 ├── vercel.json                # Vercel configuration
 └── package.json
