@@ -34,6 +34,12 @@ import {
   Cell,
 } from "recharts";
 import { getAIPredictions } from "@/lib/mockData";
+import {
+  detectPowerEvents,
+  clusterEventsByMagnitude,
+  summarizeEventsByRegion,
+  applyEventEvidence,
+} from "@/lib/eventSegmentation";
 
 const SHEET_ID = "1g9XRplcjctpLaOnxmsy7C_0o8dc9Yy4-Zny6m7XSyXg";
 const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv`;
@@ -247,7 +253,9 @@ Provide exactly 3 recommendations. Each must be specific, practical, and referen
 
       // Rows arrive already chronologically sorted from analyzeSheet, but sort
       // defensively — segmentation is meaningless on an out-of-order sequence.
-      const sorted = [...rows].sort((a, b) => a.time.localeCompare(b.time));
+      // numeric:true → "2025-01-01 9:00:00" sorts BEFORE "2025-01-01 10:00:00" (plain localeCompare
+      // would not, since the export's hours are not zero-padded). ΔP detection needs true time order.
+      const sorted = [...rows].sort((a, b) => a.time.localeCompare(b.time, undefined, { numeric: true }));
       if (sorted.length === 0) throw new Error("No data");
 
       // Parse each timestamp to real seconds. Real export format is
@@ -311,6 +319,27 @@ Provide exactly 3 recommendations. Each must be specific, practical, and referen
         ? Math.max((validEpochs[validEpochs.length - 1] - validEpochs[0]) / 86400, 1 / 24)
         : Math.max((sorted.length * SAMPLE_INTERVAL_SECONDS) / 86400, 1 / 24);
 
+      // ── Event-Based Power Segmentation (ΔP-based) — computed LOCALLY, no LLM tokens ──
+      // Reuses epochs / elapsedTo / MAX_GAP_SECONDS / regionOf from above (no duplicated logic).
+      // Only the compact summaries below (clusters + per-region stats) reach the prompt.
+      const eventAnalysis = detectPowerEvents({
+        samples: sorted,
+        epochs,
+        elapsedTo,
+        maxGapSeconds: MAX_GAP_SECONDS,
+        sampleIntervalSeconds: SAMPLE_INTERVAL_SECONDS,
+      });
+      const regionEventStats = summarizeEventsByRegion(eventAnalysis.events, totalSpanDays, regionOf);
+      const eventClusters = clusterEventsByMagnitude(eventAnalysis.events, totalSpanDays);
+      // Calibration aid: check these values on the real dataset (see POWER_CHANGE_THRESHOLD_W).
+      console.info("NILM ΔP events:", {
+        thresholdW: eventAnalysis.thresholdW,
+        noiseSigmaW: Math.round(eventAnalysis.noiseSigmaW * 100) / 100,
+        baselineW: eventAnalysis.baselineW,
+        events: eventAnalysis.events.length,
+        segments: eventAnalysis.segments.length,
+      });
+
       const regionStats = regionDefs.map(r => {
         // Use the SAME smoothed/debounced classification for both the power averages
         // and the segment stats. Previously `matched` came from the raw (pre-debounce)
@@ -329,8 +358,12 @@ Provide exactly 3 recommendations. Each must be specific, practical, and referen
         const totalActiveSec = ownSegments.reduce((s, x) => s + x.durationSec, 0);
         const avgDurationMin = ownSegments.length > 0 ? parseFloat((totalActiveSec / ownSegments.length / 60).toFixed(1)) : 0;
         const occurrencesPerDay = ownSegments.length > 0 ? parseFloat((ownSegments.length / totalSpanDays).toFixed(1)) : 0;
-        return { region: r.region, avgPower, avgCurrent, avgPF, percentage, avgDurationMin, occurrencesPerDay };
-      }).filter(Boolean) as { region: string; avgPower: number; avgCurrent: number; avgPF: number; percentage: number; avgDurationMin: number; occurrencesPerDay: number }[];
+        const ev = regionEventStats[r.region];
+        return {
+          region: r.region, avgPower, avgCurrent, avgPF, percentage, avgDurationMin, occurrencesPerDay,
+          onEventsPerDay: ev?.onPerDay ?? 0, medianOnStepW: ev?.medianOnStepW ?? 0, overlapRatio: ev?.overlapRatio ?? 0,
+        };
+      }).filter(Boolean) as { region: string; avgPower: number; avgCurrent: number; avgPF: number; percentage: number; avgDurationMin: number; occurrencesPerDay: number; onEventsPerDay: number; medianOnStepW: number; overlapRatio: number }[];
 
       // Build prompt — constrained by user's selected appliances
       const applianceWithCounts = appliances
@@ -341,6 +374,12 @@ Provide exactly 3 recommendations. Each must be specific, practical, and referen
       const applianceList = selectedAppliances.length > 0
         ? "The user confirmed these appliances exist in their home: " + applianceWithCounts + ". Daily usage: " + appliances.filter(a => a.selected).map(a => a.label + " ~" + (a.dailyHours ?? 2) + "h/day (" + (a.usageTime ?? "Variable") + ")").join(", ") + ". Only suggest devices from this list. Consider quantity and usage patterns. Do not suggest unlisted appliances."
         : "No appliance list provided. Use general knowledge to identify likely devices.";
+
+      // Compact ΔP summary for the LLM: a handful of lines instead of thousands of samples.
+      const eventPromptBlock = eventClusters.length > 0
+        ? `Aggregate load events (ΔP-based, over ${totalSpanDays.toFixed(1)} days; step threshold ${Math.round(eventAnalysis.thresholdW)}W; always-on baseline ≈ ${Math.round(eventAnalysis.baselineW)}W; ${eventAnalysis.events.length} events total):
+${eventClusters.map(c => `- ΔP≈±${c.typicalDeltaW}W: ${c.onCount} ON / ${c.offCount} OFF, ≈${c.onPerDay}/day, overlapping another load in ${Math.round(c.overlapRatio * 100)}% of ON steps`).join("\n")}`
+        : "Aggregate load events (ΔP-based): no repeating power steps detected — the aggregate power is steady or changes only by noise-level amounts.";
 
       const prompt = `You are an energy analysis expert performing NILM-inspired appliance inference from real home electrical data.
 ${applianceList}
@@ -379,12 +418,19 @@ TEMPORAL REASONING RULES (apply BEFORE picking a device):
 - If temporal behavior contradicts the power-only guess (e.g. a "fridge-range" region with only 1 occurrence/day lasting 3 hours), trust the temporal pattern over the raw power reference table.
 - If occurrences is implausibly high (>50/day) treat it as sensor noise/borderline switching rather than a real distinct appliance — label it with your best power-based guess and confidence "Low" or "Medium", but still answer, never refuse.
 
+EVENT (ΔP) EVIDENCE — Event-Based Power Segmentation, computed locally from step changes of the AGGREGATE power:
+- An event is a sustained step in TOTAL household power. ΔP is the size of that step; it is NOT an appliance label.
+- A +ΔP step means "roughly ΔP watts of load appeared" — the region shows the TOTAL level, not the appliance's own power. Several loads can overlap.
+- "overlapping" = share of ON steps that happened while another load was already running above the baseline. High overlap makes the step size a weaker clue.
+- Use ΔP as ADDITIONAL evidence next to power and temporal behavior: a repeating step size that fits the appliance's reference range supports a match; a step size that fits several appliances, or contradicts the reference range, lowers confidence.
+- Never name an appliance from a step size alone.
+
 MATCHING RULES:
 - Match each region to the appliance(s) whose power AND temporal behavior fit together.
 - Do NOT assign a refrigerator to a region above 300W unless no other match exists.
 - Each appliance should appear in ONLY ONE region (best match). Do not repeat.
 - For each region suggest 1 main appliance. Add a 2nd only if clearly different usage pattern.
-- Assign confidence: High (power + temporal pattern both match), Medium (only one of the two matches well), Low (uncertain / conflicting signals).
+- Assign confidence: High (power + temporal pattern both match, and the ΔP events do not contradict or blur it), Medium (only one of the two matches well, or the ΔP evidence is ambiguous/overlapping), Low (uncertain / conflicting / insufficient signals). ΔP evidence is supporting evidence only and never justifies High on its own.
 
 Reply ONLY with a JSON array, no extra text, no markdown. You MUST include exactly one object for EVERY region listed in the signatures below — never return an empty array, and never skip a region just because you are unsure; use confidence "Low" for uncertain guesses instead of omitting the region:
 [
@@ -393,7 +439,9 @@ Reply ONLY with a JSON array, no extra text, no markdown. You MUST include exact
 ]
 
 Electrical + temporal signatures from real home meter:
-${regionStats.map(r => `${r.region}: avgPower=${r.avgPower}W, avgCurrent=${r.avgCurrent}A, powerFactor=${r.avgPF}, timeShare=${r.percentage}%, avgDuration=${r.avgDurationMin}min, occurrences=${r.occurrencesPerDay}/day`).join("\n")}`;
+${regionStats.map(r => `${r.region}: avgPower=${r.avgPower}W, avgCurrent=${r.avgCurrent}A, powerFactor=${r.avgPF}, timeShare=${r.percentage}%, avgDuration=${r.avgDurationMin}min, occurrences=${r.occurrencesPerDay}/day, ${r.onEventsPerDay > 0 ? `stepEvents=${r.onEventsPerDay}/day (median +${r.medianOnStepW}W, overlap ${Math.round(r.overlapRatio * 100)}%)` : "stepEvents=none"}`).join("\n")}
+
+${eventPromptBlock}`;
 
       const res = await fetch("/api/gemini", {
         method: "POST",
@@ -507,7 +555,10 @@ ${regionStats.map(r => `${r.region}: avgPower=${r.avgPower}W, avgCurrent=${r.avg
           ? devices.reduce((best, d) => confidenceRank(d.confidence) > confidenceRank(best) ? d.confidence : best, devices[0].confidence)
           : "Low";
         const estimatedMinPerDay = r.avgDurationMin * r.occurrencesPerDay;
-        const confidence = adjustConfidence(detectedDevices, regionConfidence, estimatedMinPerDay);
+        // Event evidence first (can only lower High→Medium when ON steps overlap other loads),
+        // then the UNCHANGED usage-based deterministic validation has the final word.
+        const eventAdjusted = applyEventEvidence(regionConfidence, regionEventStats[r.region]);
+        const confidence = adjustConfidence(detectedDevices, eventAdjusted, estimatedMinPerDay);
         return {
           region: r.region,
           percentage: r.percentage,
