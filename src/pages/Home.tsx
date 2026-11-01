@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -25,8 +25,120 @@ import {
   BarChart2,
   Smartphone,
   Star,
+  AlertTriangle,
 } from "lucide-react";
-import { getRealtimePower, ELECTRICITY_PRICE, getEstimatedMonthlyBill } from "@/lib/mockData";
+import { getEstimatedMonthlyBill } from "@/lib/mockData";
+
+// ── Live data from Google Sheets (ESP32 + PZEM-004T → Google Sheets) ────────
+// Column order (same as GraphsAnalysis.tsx): time, voltage, current, power, powerFactor, frequency
+const SHEET_ID = "1g9XRplcjctpLaOnxmsy7C_0o8dc9Yy4-Zny6m7XSyXg";
+const SHEET_BASE_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq`;
+
+const POLL_MS = 10_000;            // check the sheet every 10s (ESP32 writes every ~20s)
+const LIVE_MAX_AGE_SEC = 120;      // last row ≤ 2 min old  → "Live"
+const OFFLINE_AFTER_SEC = 15 * 60; // last row > 15 min old → "Offline" (same as Notifications.tsx)
+const FORCE_RETRIES = 4;           // "Upload Data from Device": number of checks
+const FORCE_RETRY_GAP_MS = 6_000;  // wait between checks (≈ one ESP32 cycle in total)
+
+interface LiveReading {
+  time: string;
+  timestamp: Date | null;
+  voltage: number;
+  current: number;
+  power: number;
+  powerFactor: number;
+  frequency: number;
+}
+
+type DeviceState = "connecting" | "live" | "delayed" | "offline" | "error";
+type UploadStatus = "idle" | "loading" | "success" | "stale" | "error";
+
+// Minimal CSV line parser (handles quoted fields)
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === "," && !inQuotes) {
+      out.push(cur.trim());
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+// "YYYY-MM-DD HH:MM:SS" or "DD/MM/YYYY HH:MM:SS" → Date
+function parseSheetTimestamp(t: string): Date | null {
+  if (!t) return null;
+  const s = t.trim();
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (dmy) {
+    const d = new Date(+dmy[3], +dmy[2] - 1, +dmy[1], +dmy[4], +dmy[5], +(dmy[6] || 0));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(s.replace(" ", "T"));
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Convert CSV text to readings (the header row is dropped automatically: its "power" is not a number)
+function readingsFromCsv(text: string): LiveReading[] {
+  const rows: LiveReading[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const c = parseCsvLine(line);
+    if (c.length < 6) continue;
+    const power = parseFloat(c[3]);
+    if (!Number.isFinite(power)) continue;
+    rows.push({
+      time: c[0],
+      timestamp: parseSheetTimestamp(c[0]),
+      voltage: parseFloat(c[1]) || 0,
+      current: parseFloat(c[2]) || 0,
+      power,
+      powerFactor: parseFloat(c[4]) || 0,
+      frequency: parseFloat(c[5]) || 0,
+    });
+  }
+  return rows;
+}
+
+async function fetchCsv(query?: string): Promise<string> {
+  const params = new URLSearchParams({ tqx: "out:csv", _: String(Date.now()) });
+  if (query) params.set("tq", query);
+  const res = await fetch(`${SHEET_BASE_URL}?${params.toString()}`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Sheet request failed: " + res.status);
+  return res.text();
+}
+
+// Reads ONLY the last row of the sheet.
+// 1) light query (newest row by timestamp) → small download every poll
+// 2) fallback: download the whole sheet and take the last line (same as other pages)
+async function fetchLatestReading(): Promise<LiveReading | null> {
+  try {
+    const rows = readingsFromCsv(await fetchCsv("select * order by A desc limit 1"));
+    if (rows.length > 0) return rows[rows.length - 1];
+  } catch {
+    /* fall through to the full read */
+  }
+  const rows = readingsFromCsv(await fetchCsv());
+  return rows.length > 0 ? rows[rows.length - 1] : null;
+}
+
+function formatAge(sec: number): string {
+  if (sec < 5) return "just now";
+  if (sec < 60) return Math.round(sec) + "s ago";
+  const min = sec / 60;
+  if (min < 60) return Math.round(min) + " min ago";
+  const h = Math.floor(min / 60);
+  return h + "h " + Math.round(min % 60) + "min ago";
+}
 
 function AnimatedCounter({ target, duration = 1500 }: { target: number; duration?: number }) {
   const [count, setCount] = useState(0);
@@ -52,18 +164,79 @@ function AnimatedCounter({ target, duration = 1500 }: { target: number; duration
 }
 
 export default function HomePage() {
-  const [currentPower, setCurrentPower] = useState(1250);
+  const [reading, setReading] = useState<LiveReading | null>(null);
+  const [fetchError, setFetchError] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const [forceAttempt, setForceAttempt] = useState(0);
   const [gasTh, setGasTh] = useState(150);
   const [includeGas, setIncludeGas] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState<"idle" | "loading" | "success">("idle");
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [showBuyModal, setShowBuyModal] = useState(false);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentPower(getRealtimePower());
-    }, 3000);
-    return () => clearInterval(interval);
+  // Latest row from Google Sheets (returns the reading so the Force button can verify it)
+  const refresh = useCallback(async (): Promise<LiveReading | null> => {
+    try {
+      const latest = await fetchLatestReading();
+      if (latest) {
+        setReading(latest);
+        setFetchError(false);
+      } else {
+        setFetchError(true);
+      }
+      return latest;
+    } catch {
+      setFetchError(true);
+      return null;
+    }
   }, []);
+
+  // Real-time polling: on mount, every POLL_MS, and when the tab becomes visible again
+  useEffect(() => {
+    refresh();
+    const id = setInterval(() => {
+      if (!document.hidden) refresh();
+    }, POLL_MS);
+    const onVisible = () => {
+      if (!document.hidden) refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refresh]);
+
+  // 1s tick so "updated Xs ago" and the Live/Offline state stay accurate
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const currentPower = reading?.power ?? 0; // W
+  const ageSec = reading?.timestamp ? Math.max(0, (nowTick - reading.timestamp.getTime()) / 1000) : null;
+
+  const deviceState: DeviceState = !reading
+    ? fetchError ? "error" : "connecting"
+    : ageSec === null || ageSec <= LIVE_MAX_AGE_SEC ? "live"
+    : ageSec <= OFFLINE_AFTER_SEC ? "delayed"
+    : "offline";
+
+  const stateUI: Record<DeviceState, { dot: string; text: string; label: string }> = {
+    connecting: { dot: "bg-gray-400",  text: "text-gray-500",  label: "Connecting to Google Sheets..." },
+    live:       { dot: "bg-green-500", text: "text-green-600", label: "Live" },
+    delayed:    { dot: "bg-amber-500", text: "text-amber-600", label: "Delayed" },
+    offline:    { dot: "bg-red-500",   text: "text-red-600",   label: "Device offline" },
+    error:      { dot: "bg-red-500",   text: "text-red-600",   label: "Can't reach Google Sheets" },
+  };
+  const ui = stateUI[deviceState];
+  const ageText = ageSec !== null ? formatAge(ageSec) : null;
+
+  // Clear a "stale"/"error" message by itself once fresh data arrives
+  useEffect(() => {
+    if ((uploadStatus === "stale" || uploadStatus === "error") && deviceState === "live") {
+      setUploadStatus("idle");
+    }
+  }, [deviceState, uploadStatus]);
 
   // Sonelgaz gas — prorata sur 70 jours (vérifié sur facture réelle)
   const GAS_DAYS = 70;
@@ -79,26 +252,43 @@ export default function HomePage() {
   };
   const monthlyBill = getEstimatedMonthlyBill(currentPower, false, 0) + (includeGas ? calcGasCost(gasTh) : 0);
 
-  const handleUpload = () => {
+  // Force check: re-reads the last row of the sheet (bypassing cache) and verifies it is fresh.
+  // If the row is old, it waits and tries again (≈ one ESP32 cycle) before reporting a problem.
+  const handleUpload = async () => {
+    if (uploadStatus === "loading") return;
     setUploadStatus("loading");
-    setTimeout(() => {
-      setUploadStatus("success");
-      setTimeout(() => setUploadStatus("idle"), 3000);
-    }, 2000);
+    let latest: LiveReading | null = null;
+
+    for (let attempt = 1; attempt <= FORCE_RETRIES; attempt++) {
+      setForceAttempt(attempt);
+      latest = await refresh();
+      const age = latest?.timestamp ? (Date.now() - latest.timestamp.getTime()) / 1000 : null;
+      if (latest && (age === null || age <= LIVE_MAX_AGE_SEC)) {
+        setUploadStatus("success");
+        setTimeout(() => setUploadStatus("idle"), 4000);
+        return;
+      }
+      if (attempt < FORCE_RETRIES) {
+        await new Promise((r) => setTimeout(r, FORCE_RETRY_GAP_MS));
+      }
+    }
+    setUploadStatus(latest ? "stale" : "error");
   };
 
   const electricalParams = [
-    { label: "Voltage", value: (218 + Math.random() * 4).toFixed(1), unit: "V", icon: Zap, gradient: "from-amber-400 to-orange-500" },
-    { label: "Current", value: (currentPower / 220).toFixed(2), unit: "A", icon: Gauge, gradient: "from-blue-400 to-cyan-500" },
-    { label: "Frequency", value: (49.9 + Math.random() * 0.2).toFixed(1), unit: "Hz", icon: Waves, gradient: "from-green-400 to-emerald-500" },
-    { label: "Power Factor", value: (0.88 + Math.random() * 0.08).toFixed(2), unit: "cos φ", icon: CircleDot, gradient: "from-purple-400 to-violet-500" },
+    { label: "Voltage", value: reading ? reading.voltage.toFixed(1) : "--", unit: "V", icon: Zap, gradient: "from-amber-400 to-orange-500" },
+    { label: "Current", value: reading ? reading.current.toFixed(2) : "--", unit: "A", icon: Gauge, gradient: "from-blue-400 to-cyan-500" },
+    { label: "Frequency", value: reading ? reading.frequency.toFixed(1) : "--", unit: "Hz", icon: Waves, gradient: "from-green-400 to-emerald-500" },
+    { label: "Power Factor", value: reading ? reading.powerFactor.toFixed(2) : "--", unit: "cos φ", icon: CircleDot, gradient: "from-purple-400 to-violet-500" },
   ];
 
   // Energy Score calculation
   const energyScore = useMemo(() => {
-    const powerKw = currentPower / 1000;
-    const powerFactor = parseFloat(electricalParams[3].value);
-    const frequency = parseFloat(electricalParams[2].value);
+    if (!reading) return 0;
+    const powerKw = reading.power / 1000;
+    // PZEM reports PF = 0 when (almost) no load is connected → don't penalise that case
+    const powerFactor = reading.powerFactor > 0 ? reading.powerFactor : reading.power < 5 ? 1 : 0;
+    const frequency = reading.frequency;
 
     // Power score: lower is better (max 3kW normal)
     const powerScore = Math.max(0, 40 - (powerKw / 3) * 40);
@@ -108,9 +298,11 @@ export default function HomePage() {
     const freqScore = Math.max(0, 25 - Math.abs(frequency - 50) * 50);
 
     return Math.min(100, Math.round(powerScore + pfScore + freqScore));
-  }, [currentPower]);
+  }, [reading]);
 
-  const scoreConfig = energyScore >= 75
+  const scoreConfig = !reading
+    ? { color: "#9ca3af", bg: "from-gray-300 to-gray-400", label: "No data", msg: "Waiting for the first reading from your device" }
+    : energyScore >= 75
     ? { color: "#22c55e", bg: "from-green-400 to-emerald-500", label: "Excellent", msg: "Your energy consumption is optimal" }
     : energyScore >= 50
     ? { color: "#f59e0b", bg: "from-amber-400 to-orange-500", label: "Good", msg: "Your consumption is within normal range" }
@@ -163,13 +355,21 @@ export default function HomePage() {
           <CardContent>
             <div className="flex items-baseline gap-1">
               <span className="text-3xl font-bold text-gray-900">
-                {(currentPower / 1000).toFixed(2)}
+                {reading ? (currentPower / 1000).toFixed(2) : "--"}
               </span>
               <span className="text-lg font-medium text-gray-400">kW</span>
             </div>
-            <div className="flex items-center gap-1 mt-2">
-              <Activity className="w-3.5 h-3.5 text-green-500" />
-              <span className="text-xs text-green-600 font-medium">Live monitoring</span>
+            <div className="flex items-center gap-2 mt-2">
+              <span className="relative flex h-2 w-2">
+                {deviceState === "live" && (
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-60 ${ui.dot}`} />
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${ui.dot}`} />
+              </span>
+              <span className={`text-xs font-medium ${ui.text}`}>
+                {ui.label}
+                {reading && ageText ? ` · updated ${ageText}` : ""}
+              </span>
             </div>
           </CardContent>
         </Card>
@@ -414,18 +614,25 @@ export default function HomePage() {
               className={`w-full h-11 rounded-xl font-medium transition-all duration-300 ${
                 uploadStatus === "success"
                   ? "bg-green-500 hover:bg-green-600 shadow-green-200"
+                  : uploadStatus === "stale" || uploadStatus === "error"
+                  ? "bg-amber-500 hover:bg-amber-600 shadow-amber-200"
                   : "bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-indigo-200"
               } text-white shadow-lg hover:shadow-xl`}
             >
               {uploadStatus === "loading" ? (
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Uploading from ESP32...</span>
+                  <span>Checking Google Sheets... ({forceAttempt}/{FORCE_RETRIES})</span>
                 </div>
               ) : uploadStatus === "success" ? (
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Data Uploaded Successfully!</span>
+                  <span>Latest data received!</span>
+                </div>
+              ) : uploadStatus === "stale" || uploadStatus === "error" ? (
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>{uploadStatus === "stale" ? "No new data — Retry" : "Connection failed — Retry"}</span>
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
@@ -434,6 +641,25 @@ export default function HomePage() {
                 </div>
               )}
             </Button>
+
+            <div className="text-center space-y-1">
+              {reading && (
+                <p className="text-xs text-gray-500">
+                  Last reading: <span className="font-medium text-gray-700">{reading.time}</span>
+                  {ageText ? ` (${ageText})` : ""}
+                </p>
+              )}
+              {uploadStatus === "stale" && (
+                <p className="text-xs text-amber-600">
+                  The newest row in Google Sheets is old. Check that the ESP32 is powered and connected to WiFi.
+                </p>
+              )}
+              {uploadStatus === "error" && (
+                <p className="text-xs text-red-600">
+                  Could not read Google Sheets. Check your internet connection and that the sheet is public.
+                </p>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
