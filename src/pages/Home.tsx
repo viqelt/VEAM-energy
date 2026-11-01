@@ -27,7 +27,7 @@ import {
   Star,
   AlertTriangle,
 } from "lucide-react";
-import { getEstimatedMonthlyBill } from "@/lib/mockData";
+import { calcElecBill } from "@/lib/sonelgazTariffs";
 
 // ── Live data from Google Sheets (ESP32 + PZEM-004T → Google Sheets) ────────
 // Column order (same as GraphsAnalysis.tsx): time, voltage, current, power, powerFactor, frequency
@@ -140,6 +140,29 @@ function formatAge(sec: number): string {
   return h + "h " + Math.round(min % 60) + "min ago";
 }
 
+// ── Today's consumption ─────────────────────────────────────────────────────
+const BILL_PERIOD_DAYS = 70;       // Sonelgaz bi-monthly billing period (same as BillCalculator.tsx)
+const MAX_ENERGY_GAP_MIN = 10;     // gaps longer than this = device offline → not counted
+
+function isSameDay(a: Date, b: Date): boolean {
+  return a.toDateString() === b.toDateString();
+}
+
+// ACTUAL energy (kWh) between the first and last reading, by trapezoidal integration.
+// Unlike estimateDailyKwh() it does NOT project to 24h: it is what was really consumed so far.
+function integrateKwh(rows: LiveReading[]): number {
+  const pts = rows
+    .filter((r): r is LiveReading & { timestamp: Date } => r.timestamp !== null)
+    .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  let wh = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const dtH = (pts[i].timestamp.getTime() - pts[i - 1].timestamp.getTime()) / 3_600_000;
+    if (dtH <= 0 || dtH * 60 > MAX_ENERGY_GAP_MIN) continue;
+    wh += ((pts[i].power + pts[i - 1].power) / 2) * dtH;
+  }
+  return wh / 1000;
+}
+
 function AnimatedCounter({ target, duration = 1500 }: { target: number; duration?: number }) {
   const [count, setCount] = useState(0);
   const prevTarget = useRef(target);
@@ -166,6 +189,8 @@ function AnimatedCounter({ target, duration = 1500 }: { target: number; duration
 export default function HomePage() {
   const [reading, setReading] = useState<LiveReading | null>(null);
   const [fetchError, setFetchError] = useState(false);
+  const [todayRows, setTodayRows] = useState<LiveReading[]>([]);
+  const [todayLoaded, setTodayLoaded] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [forceAttempt, setForceAttempt] = useState(0);
   const [gasTh, setGasTh] = useState(150);
@@ -180,6 +205,15 @@ export default function HomePage() {
       if (latest) {
         setReading(latest);
         setFetchError(false);
+        // keep today's list up to date without re-downloading the sheet
+        const now = new Date();
+        if (latest.timestamp && isSameDay(latest.timestamp, now)) {
+          setTodayRows((prev) => {
+            const sameDay = prev.filter((r) => r.timestamp && isSameDay(r.timestamp, now));
+            if (sameDay.length && sameDay[sameDay.length - 1].time === latest.time) return sameDay;
+            return [...sameDay, latest];
+          });
+        }
       } else {
         setFetchError(true);
       }
@@ -190,21 +224,37 @@ export default function HomePage() {
     }
   }, []);
 
+  // Full read of today's rows (once on load, and when the tab becomes visible again)
+  const loadToday = useCallback(async () => {
+    try {
+      const all = readingsFromCsv(await fetchCsv());
+      const now = new Date();
+      setTodayRows(all.filter((r) => r.timestamp && isSameDay(r.timestamp, now)));
+      setTodayLoaded(true);
+    } catch {
+      /* keep what we already have */
+    }
+  }, []);
+
   // Real-time polling: on mount, every POLL_MS, and when the tab becomes visible again
   useEffect(() => {
     refresh();
+    loadToday();
     const id = setInterval(() => {
       if (!document.hidden) refresh();
     }, POLL_MS);
     const onVisible = () => {
-      if (!document.hidden) refresh();
+      if (!document.hidden) {
+        refresh();
+        loadToday();
+      }
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [refresh]);
+  }, [refresh, loadToday]);
 
   // 1s tick so "updated Xs ago" and the Live/Offline state stay accurate
   useEffect(() => {
@@ -213,6 +263,16 @@ export default function HomePage() {
   }, []);
 
   const currentPower = reading?.power ?? 0; // W
+
+  // Today's consumption (actual kWh so far) and its cost on Sonelgaz's progressive tariff
+  const dayKey = new Date(nowTick).toDateString();
+  const todayKwh = useMemo(
+    () => integrateKwh(todayRows.filter((r) => r.timestamp && r.timestamp.toDateString() === dayKey)),
+    [todayRows, dayKey]
+  );
+  // Cost of one day at this consumption level: tranches apply over the whole billing period,
+  // so we price (today's kWh × 70 days) and divide by 70 → average DA/day (HT)
+  const todayCost = Math.round(calcElecBill(todayKwh, BILL_PERIOD_DAYS) / BILL_PERIOD_DAYS);
   const ageSec = reading?.timestamp ? Math.max(0, (nowTick - reading.timestamp.getTime()) / 1000) : null;
 
   const deviceState: DeviceState = !reading
@@ -240,17 +300,6 @@ export default function HomePage() {
 
   // Sonelgaz gas — prorata sur 70 jours (vérifié sur facture réelle)
   const GAS_DAYS = 70;
-  const calcGasCost = (th: number): number => {
-    if (th <= 0) return 0;
-    const L1 = Math.round(2500  * (GAS_DAYS / 365));
-    const L2 = Math.round(5000  * (GAS_DAYS / 365));
-    const L3 = Math.round(15000 * (GAS_DAYS / 365));
-    if (th <= L1) return th * 0.1682;
-    if (th <= L2) return L1 * 0.1682 + (th - L1) * 0.3245;
-    if (th <= L3) return L1 * 0.1682 + (L2 - L1) * 0.3245 + (th - L2) * 0.4025;
-    return L1 * 0.1682 + (L2 - L1) * 0.3245 + (L3 - L2) * 0.4025 + (th - L3) * 0.60;
-  };
-  const monthlyBill = getEstimatedMonthlyBill(currentPower, false, 0) + (includeGas ? calcGasCost(gasTh) : 0);
 
   // Force check: re-reads the last row of the sheet (bypassing cache) and verifies it is fresh.
   // If the row is old, it waits and tries again (≈ one ESP32 cycle) before reporting a problem.
@@ -406,19 +455,19 @@ export default function HomePage() {
               <Receipt className="w-5 h-5 text-white" />
             </div>
             <div>
-              <CardTitle className="text-sm font-medium text-gray-500">Est. Monthly Bill</CardTitle>
+              <CardTitle className="text-sm font-medium text-gray-500">Today's Consumption</CardTitle>
             </div>
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline gap-1">
               <span className="text-3xl font-bold text-gray-900">
-                <AnimatedCounter target={monthlyBill} />
+                {todayLoaded ? todayKwh.toFixed(2) : "--"}
               </span>
-              <span className="text-lg font-medium text-gray-400">DA</span>
+              <span className="text-lg font-medium text-gray-400">kWh</span>
             </div>
             <div className="flex items-center gap-1 mt-2">
               <span className="text-xs text-purple-600 font-medium">
-                {includeGas ? "Electricity + Gas" : "Electricity only"}
+                {todayLoaded ? <>≈ <AnimatedCounter target={todayCost} /> DA today · HT</> : "Loading today's readings..."}
               </span>
             </div>
           </CardContent>
@@ -518,13 +567,13 @@ export default function HomePage() {
             </div>
             <div>
               <CardTitle className="text-sm font-medium text-gray-900">Gas Consumption</CardTitle>
-              <p className="text-xs text-gray-400 mt-0.5">Include gas in your bill calculation</p>
+              <p className="text-xs text-gray-400 mt-0.5">Estimate your gas cost</p>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <Label htmlFor="gas-toggle" className="text-sm text-gray-600 font-medium">
-                Include gas in total calculation
+                Show gas cost estimate
               </Label>
               <div className="flex items-center gap-2">
                 <span className={`text-xs font-medium ${!includeGas ? "text-gray-900" : "text-gray-400"}`}>OFF</span>
