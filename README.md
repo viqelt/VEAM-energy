@@ -46,11 +46,15 @@ Using a **NILM-inspired approach**, Groq AI analyzes real power signatures (volt
 
 ## ✨ Key Features
 
-### 🏠 Real-Time Dashboard
-- Live monitoring of **Voltage (V), Current (A), Power (W), Power Factor, Frequency (Hz)**
-- Updates every **3 seconds** via ESP32 → Google Sheets → Dashboard
-- **Sonelgaz Dynamic Tarification** — estimates monthly bill in real time
-- **Energy Score** — rates consumption as Good / Fair / Poor
+### 🏠 Real-Time Dashboard (Home)
+- Live monitoring of **Voltage (V), Current (A), Power (W), Power Factor, Frequency (Hz)** — all values are read from the **latest row of the Google Sheet** (no simulated data)
+- The ESP32 + PZEM-004T writes a reading every **20 seconds**; the dashboard checks the sheet every **10 seconds** (paused while the tab is hidden, refreshed as soon as it becomes visible again). Only the newest row is requested from Google Sheets, with a full-sheet fallback
+- **Device status badge** on the Real-time Power card: 🟢 **Live** (last reading ≤ 2 min) · 🟠 **Delayed** (≤ 15 min) · 🔴 **Offline** (> 15 min) · "Can't reach Google Sheets" — with a live "updated Xs ago" / "last seen …" indicator
+- **Offline display** — when the device is offline, the last values stay on screen but are greyed out and tagged **Last known**, so stale readings are never mistaken for live ones
+- **Today's Consumption** — real energy (kWh) consumed since 00:00, obtained by time-weighted (trapezoidal) integration of the Power readings (gaps longer than 10 min are not counted), plus its cost in DA (HT) on the progressive Sonelgaz electricity tariff. Resets automatically at midnight
+- **Energy Score** — 0–100 score from power level, power factor and frequency stability, rated Excellent / Good / High (greyed out as *No data* / *Offline* when there is no live reading)
+- **IoT Device Upload (Force Check)** — re-reads the last row of the sheet (cache bypassed) and checks that it is fresh; if not, it retries for about one ESP32 cycle before reporting that the device is not sending data. The web app cannot command the ESP32 — this verifies what has reached Google Sheets
+- **Gas Consumption** — optional gas cost estimate (Sonelgaz gas tranches, prorated over a 70-day period)
 - Offline data buffering in ESP32 memory, auto-uploaded on reconnection
 
 ### 📊 Graphs & Analysis
@@ -152,11 +156,11 @@ Real Electrical Data (1 reading every 20 seconds via ESP32)
 ```
 [ESP32 + PZEM-004T]
         |
-        | WiFi (every 3s)
+        | WiFi (every 20s)
         ↓
 [Google Sheets] ←── Real electrical data
         |
-        | Sheets API
+        | Public CSV (gviz) — polled by the dashboard
         ↓
 [Vercel Edge Functions]
         |
@@ -180,7 +184,7 @@ veam-energy/
 │   └── send-whatsapp.ts       # Twilio WhatsApp serverless function
 ├── src/
 │   ├── pages/
-│   │   ├── Home.tsx           # Real-time dashboard
+│   │   ├── Home.tsx           # Live dashboard: latest Sheet row, device status, today's kWh/cost, force check
 │   │   ├── GraphsAnalysis.tsx # Charts (real Google Sheets data)
 │   │   ├── AIPrediction.tsx   # AI predictions + NILM-Inspired detection
 │   │   ├── Notifications.tsx  # Alerts + WhatsApp integration
@@ -189,7 +193,7 @@ veam-energy/
 │   │   ├── AboutUs.tsx        # Project info
 │   │   └── Profile.tsx        # User profile + report export
 │   ├── lib/
-│   │   ├── mockData.ts          # Fallback data
+│   │   ├── mockData.ts          # Fallback data (used by AI Prediction)
 │   │   ├── sonelgazTariffs.ts   # Real Sonelgaz tranche/tax logic (shared by Bill Calculator & Notifications)
 │   │   ├── energyEstimate.ts    # Time-weighted energy integration from raw Power readings
 │   │   └── eventSegmentation.ts # ΔP-based event detection, power segments & event features for NILM
