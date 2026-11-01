@@ -289,7 +289,14 @@ export default function HomePage() {
     error:      { dot: "bg-red-500",   text: "text-red-600",   label: "Can't reach Google Sheets" },
   };
   const ui = stateUI[deviceState];
-  const ageText = ageSec !== null ? formatAge(ageSec) : null;
+  const isStale = deviceState === "offline";
+  // < 1 day → "3h 20min ago" · ≥ 1 day → "28 Feb 2025"
+  const ageText =
+    ageSec === null || !reading?.timestamp
+      ? null
+      : ageSec < 86_400
+      ? formatAge(ageSec)
+      : reading.timestamp.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
   // Clear a "stale"/"error" message by itself once fresh data arrives
   useEffect(() => {
@@ -351,6 +358,8 @@ export default function HomePage() {
 
   const scoreConfig = !reading
     ? { color: "#9ca3af", bg: "from-gray-300 to-gray-400", label: "No data", msg: "Waiting for the first reading from your device" }
+    : isStale
+    ? { color: "#9ca3af", bg: "from-gray-300 to-gray-400", label: "Offline", msg: "Device is offline — showing the last known score" }
     : energyScore >= 75
     ? { color: "#22c55e", bg: "from-green-400 to-emerald-500", label: "Excellent", msg: "Your energy consumption is optimal" }
     : energyScore >= 50
@@ -403,10 +412,15 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline gap-1">
-              <span className="text-3xl font-bold text-gray-900">
+              <span className={`text-3xl font-bold ${isStale ? "text-gray-400" : "text-gray-900"}`}>
                 {reading ? (currentPower / 1000).toFixed(2) : "--"}
               </span>
               <span className="text-lg font-medium text-gray-400">kW</span>
+              {isStale && reading && (
+                <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
+                  Last known
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 mt-2">
               <span className="relative flex h-2 w-2">
@@ -417,7 +431,7 @@ export default function HomePage() {
               </span>
               <span className={`text-xs font-medium ${ui.text}`}>
                 {ui.label}
-                {reading && ageText ? ` · updated ${ageText}` : ""}
+                {reading && ageText ? (isStale ? ` · last seen ${ageText}` : ` · updated ${ageText}`) : ""}
               </span>
             </div>
           </CardContent>
@@ -537,10 +551,15 @@ export default function HomePage() {
         <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
           <Radio className="w-4 h-4 text-indigo-500" />
           Real-time Electrical Parameters
+          {isStale && reading && (
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
+              Last known
+            </span>
+          )}
         </h3>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {electricalParams.map((param) => (
-            <Card key={param.label} className="border-0 shadow-sm shadow-gray-100 hover:shadow-md hover:shadow-indigo-100/40 hover:-translate-y-0.5 transition-all duration-300 cursor-default">
+            <Card key={param.label} className={`border-0 shadow-sm shadow-gray-100 hover:shadow-md hover:shadow-indigo-100/40 hover:-translate-y-0.5 transition-all duration-300 cursor-default ${isStale ? "opacity-50" : ""}`}>
               <CardContent className="p-4 flex items-center gap-3">
                 <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${param.gradient} flex items-center justify-center shadow-sm flex-shrink-0`}>
                   <param.icon className="w-4 h-4 text-white" />
@@ -695,7 +714,12 @@ export default function HomePage() {
               {reading && (
                 <p className="text-xs text-gray-500">
                   Last reading: <span className="font-medium text-gray-700">{reading.time}</span>
-                  {ageText ? ` (${ageText})` : ""}
+                  {ageSec !== null && ageSec < 86_400 && ageText ? ` (${ageText})` : ""}
+                </p>
+              )}
+              {isStale && uploadStatus === "idle" && (
+                <p className="text-xs text-amber-600">
+                  Device offline — the values on this page are the last known readings.
                 </p>
               )}
               {uploadStatus === "stale" && (
