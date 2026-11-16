@@ -671,11 +671,99 @@ export default function HomePage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <img
-              src="https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&q=80"
-              alt="IoT Device"
-              className="w-full h-28 object-cover rounded-xl"
-            />
+            {/* ESP32 -> WiFi -> Google Sheets -> VEAM data-flow illustration */}
+            <div className="w-full h-28 rounded-xl overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/20">
+              <svg
+                viewBox="0 0 400 112"
+                className="w-full h-full"
+                preserveAspectRatio="xMidYMid meet"
+                role="img"
+                aria-label="ESP32 sends data over WiFi to Google Sheets and then to the VEAM dashboard"
+              >
+                <defs>
+                  <linearGradient id="iotBar" x1="0" y1="1" x2="0" y2="0">
+                    <stop offset="0" stopColor="#6366f1" />
+                    <stop offset="1" stopColor="#38bdf8" />
+                  </linearGradient>
+                </defs>
+
+                {/* ESP32 module */}
+                <g>
+                  {[40, 48, 56, 64, 72].map((y) => (
+                    <g key={y}>
+                      <rect x="26" y={y} width="6" height="2.5" rx="1" fill="#a5b4fc" />
+                      <rect x="88" y={y} width="6" height="2.5" rx="1" fill="#a5b4fc" />
+                    </g>
+                  ))}
+                  <rect x="30" y="32" width="60" height="48" rx="8" fill="#1e293b" stroke="#818cf8" strokeWidth="1.5" />
+                  <rect x="42" y="42" width="36" height="22" rx="3" fill="#312e81" stroke="#6366f1" />
+                  <text x="60" y="56" textAnchor="middle" fontSize="9" fontWeight="700" fill="#e0e7ff">ESP32</text>
+                  <circle cx="38" cy="72" r="2" fill="#22c55e">
+                    <animate attributeName="opacity" values="1;0.2;1" dur="1.4s" repeatCount="indefinite" />
+                  </circle>
+                </g>
+
+                {/* WiFi link */}
+                <g stroke="#818cf8" strokeWidth="1.6" fill="none" strokeLinecap="round">
+                  <path d="M121.5 37.5 A12 12 0 0 1 138.5 37.5">
+                    <animate attributeName="opacity" values="0.15;1;0.15" dur="1.6s" begin="0.4s" repeatCount="indefinite" />
+                  </path>
+                  <path d="M124.3 40.3 A8 8 0 0 1 135.7 40.3">
+                    <animate attributeName="opacity" values="0.15;1;0.15" dur="1.6s" begin="0.2s" repeatCount="indefinite" />
+                  </path>
+                  <path d="M127.2 43.2 A4 4 0 0 1 132.8 43.2">
+                    <animate attributeName="opacity" values="0.15;1;0.15" dur="1.6s" repeatCount="indefinite" />
+                  </path>
+                </g>
+                <circle cx="130" cy="46" r="1.8" fill="#a5b4fc" />
+                <line x1="98" y1="62" x2="166" y2="62" stroke="#6366f1" strokeWidth="1.5" strokeDasharray="4 4">
+                  <animate attributeName="stroke-dashoffset" from="16" to="0" dur="1.2s" repeatCount="indefinite" />
+                </line>
+                <circle cy="62" r="2.8" fill="#c7d2fe">
+                  <animate attributeName="cx" from="98" to="166" dur="1.6s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0;1;1;0" dur="1.6s" repeatCount="indefinite" />
+                </circle>
+
+                {/* Google Sheets */}
+                <g>
+                  <rect x="176" y="30" width="48" height="52" rx="6" fill="#052e16" stroke="#4ade80" strokeWidth="1.5" />
+                  <rect x="185" y="40" width="30" height="32" rx="2" fill="none" stroke="#4ade80" strokeWidth="1" />
+                  <rect x="185" y="40" width="30" height="8" fill="#16a34a" opacity="0.6" />
+                  <line x1="185" y1="56" x2="215" y2="56" stroke="#4ade80" strokeWidth="1" opacity="0.7" />
+                  <line x1="185" y1="64" x2="215" y2="64" stroke="#4ade80" strokeWidth="1" opacity="0.7" />
+                  <line x1="195" y1="40" x2="195" y2="72" stroke="#4ade80" strokeWidth="1" opacity="0.7" />
+                  <line x1="205" y1="40" x2="205" y2="72" stroke="#4ade80" strokeWidth="1" opacity="0.7" />
+                </g>
+
+                {/* Sheets -> Dashboard link */}
+                <line x1="232" y1="62" x2="302" y2="62" stroke="#4ade80" strokeWidth="1.5" strokeDasharray="4 4">
+                  <animate attributeName="stroke-dashoffset" from="16" to="0" dur="1.2s" repeatCount="indefinite" />
+                </line>
+                <circle cy="62" r="2.8" fill="#bbf7d0">
+                  <animate attributeName="cx" from="232" to="302" dur="1.6s" begin="0.8s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0;1;1;0" dur="1.6s" begin="0.8s" repeatCount="indefinite" />
+                </circle>
+
+                {/* VEAM dashboard */}
+                <g>
+                  <rect x="310" y="30" width="60" height="52" rx="8" fill="#1e293b" stroke="#60a5fa" strokeWidth="1.5" />
+                  <rect x="320" y="58" width="8" height="14" rx="1.5" fill="url(#iotBar)" />
+                  <rect x="332" y="50" width="8" height="22" rx="1.5" fill="url(#iotBar)" />
+                  <rect x="344" y="60" width="8" height="12" rx="1.5" fill="url(#iotBar)" />
+                  <rect x="356" y="42" width="8" height="30" rx="1.5" fill="url(#iotBar)" />
+                  <circle cx="320" cy="40" r="1.8" fill="#f87171" />
+                  <circle cx="326" cy="40" r="1.8" fill="#fbbf24" />
+                  <circle cx="332" cy="40" r="1.8" fill="#4ade80" />
+                </g>
+
+                {/* Labels */}
+                <g fontSize="8.5" fill="#94a3b8" textAnchor="middle" fontFamily="system-ui, sans-serif">
+                  <text x="60" y="98">ESP32 sensor</text>
+                  <text x="200" y="98">Google Sheets</text>
+                  <text x="340" y="98">VEAM</text>
+                </g>
+              </svg>
+            </div>
             <Button
               onClick={handleUpload}
               disabled={uploadStatus === "loading"}
