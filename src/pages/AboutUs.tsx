@@ -15,7 +15,7 @@ import {
 const teamMembers = [
   {
     name: "Oussama Benzaara",
-    role: "Master Industrial Electrotechnics",
+    role: "Master Industrial Electrical Engineering",
     email: "oussama.benzaara@gmail.com",
     gradient: "from-indigo-500 to-purple-600",
     initials: "OB",
