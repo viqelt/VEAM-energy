@@ -261,7 +261,7 @@ The current release focuses on the core PFE deliverable: real IoT data, NILM-ins
     <td align="center">
       <strong>Oussama Benzaara</strong><br/>
       <a href="https://github.com/viqelt">@viqelt</a><br/>
-      Master — Industrial Electrotechnics<br/>
+      Master — Industrial Elecrical Engineering<br/>
       University of Souk Ahras, Algeria
     </td>
     <td align="center">
